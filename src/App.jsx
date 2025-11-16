@@ -183,24 +183,29 @@ function App() {
 
       setCurrentUser(newUser);
 
-      // Find existing circles in same city with space
+      // 🔥 WICHTIG: Matching NUR nach INTERESTS, NICHT Stadt!
+      // Find existing circles with space (max 2 people)
       const { data: existingCircles, error: circlesError } = await supabase
         .from('circles')
         .select(`
           *,
           circle_members(count)
         `)
-        .eq('city', userData.city)
-        .eq('status', 'active');
+        .eq('status', 'active'); // KEIN .eq('city') Filter mehr!
 
       let matchedCircle = null;
 
       if (existingCircles && existingCircles.length > 0) {
-        // Find circles with less than 6 members and good interest overlap
+        // 🔥 GEÄNDERT: Max 2 Personen statt 6!
+        // Find circles with less than 2 members and good interest overlap
         for (const circle of existingCircles) {
           const memberCount = circle.circle_members[0]?.count || 0;
-          if (memberCount < 6) {
+          
+          // ✅ WICHTIG: Nur Circles mit < 2 Members
+          if (memberCount < 2) {
             const overlap = calculateInterestOverlap(userData.interests, circle.top_interests || []);
+            
+            // ✅ Mind. 2 gemeinsame Interests
             if (overlap >= 2) {
               matchedCircle = circle;
               break;
@@ -299,7 +304,7 @@ function App() {
 
     } catch (error) {
       console.error('Error creating circle:', error);
-      alert('Error creating circle. Please try again.');
+      alert('Error creating circle: ' + error.message);
     }
   };
 
@@ -453,7 +458,7 @@ function App() {
     </div>
   );
 
-  // RENDER SCREENS (gleich wie vorher, nur Chat nutzt jetzt Echtzeit-Daten)
+  // RENDER SCREENS
 
   if (screen === 'welcome') return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: colors.white }}>
@@ -543,12 +548,29 @@ function App() {
   if (screen === 'voting') {
     if (currentVotingIndex >= votingActivities.length) {
       return (
-        <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: colors.background }}>
-          <div className="text-center">
-            <div className="text-6xl mb-4">⏳</div>
-            <p className="text-xl font-semibold" style={{ color: colors.deepBlue }}>Calculating results...</p>
+        <>
+          <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: colors.background }}>
+            <div className="text-center">
+              <div className="text-6xl mb-4">⏳</div>
+              <p className="text-xl font-semibold" style={{ color: colors.deepBlue }}>Calculating results...</p>
+            </div>
           </div>
-        </div>
+          {showWinnerModal && winningActivity && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+              <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center">
+                <div className="text-6xl mb-4">🏆</div>
+                <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>Winner!</h3>
+                <p className="text-gray-600 mb-6">Your Cirqle has chosen</p>
+                <div className="text-5xl mb-4">{winningActivity.emoji}</div>
+                <h4 className="text-xl font-semibold mb-2" style={{ color: colors.primary }}>{winningActivity.title}</h4>
+                <p className="text-gray-600 mb-4">{winningActivity.description}</p>
+                <button onClick={startDatePoll} className="w-full py-3 rounded-full font-semibold" style={{ backgroundColor: colors.primary, color: colors.white }}>
+                  Pick a Date
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       );
     }
     
@@ -577,7 +599,7 @@ function App() {
                 <p className="text-gray-600 mb-4">{activity.description}</p>
                 <div className="flex items-center justify-between">
                   <span className="text-lg font-semibold" style={{ color: colors.primary }}>{activity.price}</span>
-                  <span className="text-sm text-gray-500">For your group of {currentCircle?.members.length || 6}</span>
+                  <span className="text-sm text-gray-500">For your group of {currentCircle?.members.length || 2}</span>
                 </div>
               </div>
             </div>
@@ -738,7 +760,7 @@ function App() {
           <div className="flex items-start justify-between mb-3">
             <h3 className="text-xl font-semibold" style={{ color: colors.deepBlue }}>Your Active Cirqle</h3>
             <span className="text-sm font-medium px-3 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>
-              {currentCircle.members.length}/6
+              {currentCircle.members.length}/2
             </span>
           </div>
           <p className="text-sm text-gray-600 mb-3">{currentCircle.city}</p>
@@ -795,32 +817,10 @@ function App() {
           <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>You're in! 🎉</h3>
           <p className="text-gray-600 mb-4">Matched with {currentCircle?.members.length} people</p>
           <div className="flex justify-center gap-2 flex-wrap mb-4">
-            {currentCircle?.members.slice(0, 6).map((m, i) => (
+            {currentCircle?.members.slice(0, 2).map((m, i) => (
               <div key={i} className="text-3xl">{m.photo}</div>
             ))}
           </div>
-        </div>
-      </div>
-    );
-  };
-
-  const WinnerModal = () => {
-    if (!showWinnerModal || !winningActivity) return null;
-    
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4" style={{ zIndex: 9999 }}>
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center">
-          <div className="text-6xl mb-4">🏆</div>
-          <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>Winner!</h3>
-          <p className="text-gray-600 mb-6">Your Cirqle has chosen</p>
-          
-          <div className="text-5xl mb-4">{winningActivity.emoji}</div>
-          <h4 className="text-xl font-semibold mb-2" style={{ color: colors.primary }}>{winningActivity.title}</h4>
-          <p className="text-gray-600 mb-4">{winningActivity.description}</p>
-          
-          <button onClick={startDatePoll} className="w-full py-3 rounded-full font-semibold" style={{ backgroundColor: colors.primary, color: colors.white }}>
-            Pick a Date
-          </button>
         </div>
       </div>
     );
@@ -862,7 +862,6 @@ function App() {
       </div>}
       
       <MatchingNotification />
-      <WinnerModal />
       <EventConfirmationModal />
     </div>
   );
