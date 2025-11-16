@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageCircle, Users, User, MapPin, Send, ArrowLeft, Edit2, Check, Trophy, Star, Calendar } from 'lucide-react';
+import { supabase } from './supabaseClient';
 
 const colors = {
   lightBlue: '#7BB9FF',
@@ -83,14 +84,11 @@ const generateDateOptions = () => {
   return dates;
 };
 
-let USER_DATABASE = [];
-let CURRENT_USER = null;
-let CIRCLES_HISTORY = [];
-
 function App() {
   const [screen, setScreen] = useState('welcome');
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [userData, setUserData] = useState({ name: '', age: '', photo: null, city: '', interests: [] });
+  const [currentUser, setCurrentUser] = useState(null);
   const [currentCircle, setCurrentCircle] = useState(null);
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState('');
@@ -105,100 +103,222 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [showDatePoll, setShowDatePoll] = useState(false);
   const [showEventConfirmation, setShowEventConfirmation] = useState(false);
-  const [showFeedbackPoll, setShowFeedbackPoll] = useState(false);
-  const [eventRating, setEventRating] = useState(0);
-  const [wantsToStay, setWantsToStay] = useState(null);
   const [bottomNav, setBottomNav] = useState('circle');
   const chatEndRef = useRef(null);
+  const messagesSubscription = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Subscribe to real-time messages
+  useEffect(() => {
+    if (!currentCircle) return;
+
+    loadMessages();
+
+    messagesSubscription.current = supabase
+      .channel(`messages:${currentCircle.id}`)
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `circle_id=eq.${currentCircle.id}` },
+        (payload) => {
+          const newMessage = payload.new;
+          setMessages(prev => [...prev, {
+            id: newMessage.id,
+            user: newMessage.user_name,
+            text: newMessage.text,
+            timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (messagesSubscription.current) {
+        supabase.removeChannel(messagesSubscription.current);
+      }
+    };
+  }, [currentCircle]);
+
+  const loadMessages = async () => {
+    if (!currentCircle) return;
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('circle_id', currentCircle.id)
+      .order('created_at', { ascending: true });
+
+    if (data) {
+      setMessages(data.map(m => ({
+        id: m.id,
+        user: m.user_name,
+        text: m.text,
+        timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      })));
+    }
+  };
 
   const calculateInterestOverlap = (interests1, interests2) => {
     const common = interests1.filter(i => interests2.includes(i));
     return common.length;
   };
 
-  const findAndCreateCircle = () => {
-    const newUser = { id: Date.now(), ...userData };
-    CURRENT_USER = newUser;
-    USER_DATABASE.push(newUser);
+  const findAndCreateCircle = async () => {
+    try {
+      // Create user in database
+      const { data: newUser, error: userError } = await supabase
+        .from('users')
+        .insert([{
+          name: userData.name,
+          age: parseInt(userData.age),
+          photo_url: userData.photo || '👤',
+          city: userData.city,
+          interests: userData.interests
+        }])
+        .select()
+        .single();
 
-    const mockUsers = [
-      { id: Date.now() + 1, name: 'Sophie', age: '24', city: userData.city, interests: [...userData.interests.slice(0, 2), 'Music'], photo: '👩' },
-      { id: Date.now() + 2, name: 'Marc', age: '26', city: userData.city, interests: [...userData.interests.slice(0, 3), 'Gaming'], photo: '👨' },
-      { id: Date.now() + 3, name: 'Emma', age: '23', city: userData.city, interests: [...userData.interests.slice(1, 4)], photo: '👩' },
-      { id: Date.now() + 4, name: 'Lucas', age: '25', city: userData.city, interests: [...userData.interests.slice(0, 2), 'Sports'], photo: '👨' },
-      { id: Date.now() + 5, name: 'Julie', age: '27', city: userData.city, interests: [...userData.interests.slice(1, 3), 'Cooking'], photo: '👩' }
-    ];
+      if (userError) throw userError;
 
-    USER_DATABASE.push(...mockUsers);
+      setCurrentUser(newUser);
 
-    const circleMembers = [newUser, ...mockUsers];
+      // Find existing circles in same city with space
+      const { data: existingCircles, error: circlesError } = await supabase
+        .from('circles')
+        .select(`
+          *,
+          circle_members(count)
+        `)
+        .eq('city', userData.city)
+        .eq('status', 'active');
 
-    const allInterests = {};
-    circleMembers.forEach(member => {
-      member.interests.forEach(interest => {
-        allInterests[interest] = (allInterests[interest] || 0) + 1;
-      });
-    });
+      let matchedCircle = null;
 
-    const topInterests = Object.entries(allInterests)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([interest]) => interest);
-
-    const circle = {
-      id: Date.now(),
-      members: circleMembers,
-      city: userData.city,
-      topInterests: topInterests,
-      created_at: new Date().toISOString()
-    };
-
-    setCurrentCircle(circle);
-
-    const activities = [];
-    topInterests.forEach(interest => {
-      if (ACTIVITY_DATABASE[interest]) {
-        activities.push(...ACTIVITY_DATABASE[interest]);
+      if (existingCircles && existingCircles.length > 0) {
+        // Find circles with less than 6 members and good interest overlap
+        for (const circle of existingCircles) {
+          const memberCount = circle.circle_members[0]?.count || 0;
+          if (memberCount < 6) {
+            const overlap = calculateInterestOverlap(userData.interests, circle.top_interests || []);
+            if (overlap >= 2) {
+              matchedCircle = circle;
+              break;
+            }
+          }
+        }
       }
-    });
 
-    const selectedActivities = activities.slice(0, 8);
-    setVotingActivities(selectedActivities);
+      if (matchedCircle) {
+        // Join existing circle
+        await supabase
+          .from('circle_members')
+          .insert([{
+            circle_id: matchedCircle.id,
+            user_id: newUser.id
+          }]);
 
-    setShowMatchingNotification(true);
-    setTimeout(() => {
-      setShowMatchingNotification(false);
-      setScreen('voting');
-    }, 3000);
+        // Load circle members
+        const { data: members } = await supabase
+          .from('circle_members')
+          .select(`
+            user_id,
+            users(*)
+          `)
+          .eq('circle_id', matchedCircle.id);
+
+        const membersList = members.map(m => ({
+          id: m.users.id,
+          name: m.users.name,
+          age: m.users.age,
+          photo: m.users.photo_url,
+          interests: m.users.interests
+        }));
+
+        setCurrentCircle({
+          ...matchedCircle,
+          members: membersList
+        });
+      } else {
+        // Create new circle
+        const allInterests = {};
+        userData.interests.forEach(interest => {
+          allInterests[interest] = 1;
+        });
+
+        const topInterests = Object.keys(allInterests).slice(0, 3);
+
+        const { data: newCircle, error: createError } = await supabase
+          .from('circles')
+          .insert([{
+            city: userData.city,
+            top_interests: topInterests,
+            status: 'active'
+          }])
+          .select()
+          .single();
+
+        if (createError) throw createError;
+
+        // Add user to circle
+        await supabase
+          .from('circle_members')
+          .insert([{
+            circle_id: newCircle.id,
+            user_id: newUser.id
+          }]);
+
+        setCurrentCircle({
+          ...newCircle,
+          members: [{
+            id: newUser.id,
+            name: newUser.name,
+            age: newUser.age,
+            photo: newUser.photo_url,
+            interests: newUser.interests
+          }]
+        });
+      }
+
+      // Generate activities
+      const activities = [];
+      const topInt = matchedCircle?.top_interests || userData.interests.slice(0, 3);
+      topInt.forEach(interest => {
+        if (ACTIVITY_DATABASE[interest]) {
+          activities.push(...ACTIVITY_DATABASE[interest]);
+        }
+      });
+
+      setVotingActivities(activities.slice(0, 8));
+
+      setShowMatchingNotification(true);
+      setTimeout(() => {
+        setShowMatchingNotification(false);
+        setScreen('voting');
+      }, 3000);
+
+    } catch (error) {
+      console.error('Error creating circle:', error);
+      alert('Error creating circle. Please try again.');
+    }
   };
 
   const voteForActivity = (activityId, rating) => {
     const newVotes = { ...userVotes, [activityId]: rating };
     setUserVotes(newVotes);
 
-    console.log('Voted:', activityId, rating, 'Current index:', currentVotingIndex, 'Total:', votingActivities.length);
-
     if (currentVotingIndex < votingActivities.length - 1) {
-      // Not the last activity, move to next
       setCurrentVotingIndex(currentVotingIndex + 1);
     } else {
-      // This is the last activity - finish voting
-      console.log('Last vote! Finishing...');
       finishVoting(newVotes);
     }
   };
 
   const finishVoting = (finalUserVotes) => {
-    console.log('Finish voting called!', finalUserVotes);
-    
     const allVotes = {};
     
     votingActivities.forEach(activity => {
-      const votes = [finalUserVotes[activity.id] || 3]; // Default to 3 if undefined
+      const votes = [finalUserVotes[activity.id] || 3];
       for (let i = 0; i < 5; i++) {
         votes.push(Math.floor(Math.random() * 4) + 1);
       }
@@ -217,17 +337,10 @@ function App() {
       }
     });
 
-    console.log('Winner found:', winner);
-
     if (winner) {
-      const winnerWithScore = { ...winner, score: highestScore.toFixed(1) };
-      setWinningActivity(winnerWithScore);
-      
-      // Force show the modal
+      setWinningActivity({ ...winner, score: highestScore.toFixed(1) });
       setTimeout(() => {
-        console.log('Showing winner modal');
         setShowWinnerModal(true);
-        setScreen('modal'); // Change screen to trigger re-render
       }, 300);
     }
   };
@@ -257,39 +370,7 @@ function App() {
     
     setTimeout(() => {
       setShowEventConfirmation(false);
-      setShowFeedbackPoll(true);
     }, 3000);
-  };
-
-  const submitFeedback = () => {
-    if (wantsToStay) {
-      setShowFeedbackPoll(false);
-      setEventRating(0);
-      setWantsToStay(null);
-      setUserVotes({});
-      setCurrentVotingIndex(0);
-      
-      CIRCLES_HISTORY.push({
-        ...currentCircle,
-        activity: winningActivity,
-        date: selectedDate,
-        rating: eventRating,
-        completed: true
-      });
-      
-      setScreen('voting');
-    } else {
-      setShowFeedbackPoll(false);
-      CIRCLES_HISTORY.push({
-        ...currentCircle,
-        activity: winningActivity,
-        date: selectedDate,
-        rating: eventRating,
-        completed: true
-      });
-      setCurrentCircle(null);
-      setScreen('home');
-    }
   };
 
   const handleOnboardingNext = () => {
@@ -325,18 +406,23 @@ function App() {
     }
   };
 
-  const sendMessage = () => {
-    if (!messageInput.trim() || !currentCircle) return;
+  const sendMessage = async () => {
+    if (!messageInput.trim() || !currentCircle || !currentUser) return;
 
-    const newMessage = {
-      id: Date.now(),
-      user: CURRENT_USER.name,
-      text: messageInput,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
+    try {
+      await supabase
+        .from('messages')
+        .insert([{
+          circle_id: currentCircle.id,
+          user_id: currentUser.id,
+          user_name: currentUser.name,
+          text: messageInput
+        }]);
 
-    setMessages([...messages, newMessage]);
-    setMessageInput('');
+      setMessageInput('');
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
   };
 
   const CircleLogo = ({ size = 80, color = colors.primary }) => (
@@ -366,6 +452,8 @@ function App() {
       </button>
     </div>
   );
+
+  // RENDER SCREENS (gleich wie vorher, nur Chat nutzt jetzt Echtzeit-Daten)
 
   if (screen === 'welcome') return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: colors.white }}>
@@ -454,7 +542,6 @@ function App() {
 
   if (screen === 'voting') {
     if (currentVotingIndex >= votingActivities.length) {
-      // Fallback: if somehow we're past all activities, show loading
       return (
         <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: colors.background }}>
           <div className="text-center">
@@ -490,7 +577,7 @@ function App() {
                 <p className="text-gray-600 mb-4">{activity.description}</p>
                 <div className="flex items-center justify-between">
                   <span className="text-lg font-semibold" style={{ color: colors.primary }}>{activity.price}</span>
-                  <span className="text-sm text-gray-500">For your group of 6</span>
+                  <span className="text-sm text-gray-500">For your group of {currentCircle?.members.length || 6}</span>
                 </div>
               </div>
             </div>
@@ -515,7 +602,6 @@ function App() {
                 ))}
               </div>
             </div>
-
             <p className="text-center text-sm text-gray-500">Rate from 1 to 4</p>
           </div>
         </div>
@@ -645,26 +731,24 @@ function App() {
   if (screen === 'home') return (
     <div className="min-h-screen pb-20 px-6 py-8" style={{ backgroundColor: colors.background }}>
       <h1 className="text-3xl font-bold mb-2" style={{ color: colors.deepBlue }}>Welcome, {userData.name}!</h1>
-      <p className="text-gray-600 mb-8">Your Cirqle history</p>
+      <p className="text-gray-600 mb-8">Your Cirqle</p>
       
-      {CIRCLES_HISTORY.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="text-6xl mb-4">🎯</div>
-          <p className="text-gray-500">No past activities yet</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {CIRCLES_HISTORY.map((circle, idx) => (
-            <div key={idx} className="p-6 rounded-3xl" style={{ backgroundColor: colors.white }}>
-              <div className="flex items-start gap-4">
-                <span className="text-4xl">{circle.activity?.emoji}</span>
-                <div className="flex-1">
-                  <h3 className="font-semibold mb-1" style={{ color: colors.deepBlue }}>{circle.activity?.title}</h3>
-                  <p className="text-sm text-gray-600">{circle.date?.display}</p>
-                </div>
-              </div>
-            </div>
-          ))}
+      {currentCircle && (
+        <div onClick={() => setScreen('chat')} className="p-6 rounded-3xl cursor-pointer" style={{ backgroundColor: colors.white }}>
+          <div className="flex items-start justify-between mb-3">
+            <h3 className="text-xl font-semibold" style={{ color: colors.deepBlue }}>Your Active Cirqle</h3>
+            <span className="text-sm font-medium px-3 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>
+              {currentCircle.members.length}/6
+            </span>
+          </div>
+          <p className="text-sm text-gray-600 mb-3">{currentCircle.city}</p>
+          <div className="flex flex-wrap gap-2">
+            {currentCircle.top_interests?.map(i => (
+              <span key={i} className="px-3 py-1 rounded-full text-sm" style={{ backgroundColor: colors.background, color: colors.primary }}>
+                {i}
+              </span>
+            ))}
+          </div>
         </div>
       )}
       
@@ -709,9 +793,9 @@ function App() {
             <Check size={40} color={colors.primary} />
           </div>
           <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>You're in! 🎉</h3>
-          <p className="text-gray-600 mb-4">We found 6 people with similar interests</p>
+          <p className="text-gray-600 mb-4">Matched with {currentCircle?.members.length} people</p>
           <div className="flex justify-center gap-2 flex-wrap mb-4">
-            {currentCircle?.members.map((m, i) => (
+            {currentCircle?.members.slice(0, 6).map((m, i) => (
               <div key={i} className="text-3xl">{m.photo}</div>
             ))}
           </div>
@@ -721,12 +805,7 @@ function App() {
   };
 
   const WinnerModal = () => {
-    if (!showWinnerModal || !winningActivity) {
-      console.log('Winner modal not showing:', { showWinnerModal, winningActivity });
-      return null;
-    }
-    
-    console.log('Rendering winner modal!');
+    if (!showWinnerModal || !winningActivity) return null;
     
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4" style={{ zIndex: 9999 }}>
@@ -771,64 +850,6 @@ function App() {
     );
   };
 
-  const FeedbackModal = () => {
-    if (!showFeedbackPoll) return null;
-    
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center">
-          {eventRating === 0 ? (
-            <>
-              <div className="text-6xl mb-4">💭</div>
-              <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>How was it?</h3>
-              <p className="text-gray-600 mb-6">Rate your experience</p>
-              
-              <div className="flex justify-center gap-3 mb-6">
-                {[1, 2, 3, 4].map(rating => (
-                  <button
-                    key={rating}
-                    onClick={() => setEventRating(rating)}
-                    className="p-4 rounded-2xl"
-                    style={{ backgroundColor: colors.background, border: `2px solid ${colors.primary}` }}
-                  >
-                    <div className="flex gap-1">
-                      {[...Array(rating)].map((_, i) => (
-                        <Star key={i} size={18} fill={colors.primary} color={colors.primary} />
-                      ))}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="text-6xl mb-4">🤔</div>
-              <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>Stay in this Cirqle?</h3>
-              <p className="text-gray-600 mb-6">Want to do more activities?</p>
-              
-              <div className="flex gap-3">
-                <button
-                  onClick={() => { setWantsToStay(false); submitFeedback(); }}
-                  className="flex-1 py-3 rounded-full font-semibold border-2"
-                  style={{ borderColor: colors.primary, color: colors.primary, backgroundColor: colors.white }}
-                >
-                  No
-                </button>
-                <button
-                  onClick={() => { setWantsToStay(true); submitFeedback(); }}
-                  className="flex-1 py-3 rounded-full font-semibold"
-                  style={{ backgroundColor: colors.primary, color: colors.white }}
-                >
-                  Yes!
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="font-sans">
       {screen === 'welcome' && <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: colors.white }}>
@@ -843,7 +864,6 @@ function App() {
       <MatchingNotification />
       <WinnerModal />
       <EventConfirmationModal />
-      <FeedbackModal />
     </div>
   );
 }
