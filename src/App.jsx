@@ -270,7 +270,7 @@ function App() {
     }
   };
 
-  // 🔥 FIX 1: handleSignUp - Redirect zum Onboarding
+  // 🔥 FIX 1: handleSignUp - Redirect zum Onboarding + Session setzen
   const handleSignUp = async () => {
     try {
       setAuthError('');
@@ -283,8 +283,14 @@ function App() {
 
       if (error) throw error;
 
+      // ✅ WICHTIG: Setze Session sofort nach Registrierung
+      if (data.session) {
+        setSession(data.session);
+        console.log('✅ Session set after registration:', data.session.user.id);
+      }
+
       setAuthData({ email: '', password: '' });
-      setScreen('onboarding');  // ✅ KRITISCH: Redirect zum Onboarding
+      setScreen('onboarding');
       console.log('✅ Registered successfully, redirecting to onboarding');
     } catch (error) {
       setAuthError(error.message);
@@ -330,10 +336,24 @@ function App() {
   };
 
   const findAndCreateCircle = async () => {
+    // ✅ BESSERER CHECK: Zeige Details warum kein Login
     if (!session) {
-      alert('Please login first');
+      console.error('❌ No session found!');
+      console.log('Current session state:', session);
+      alert('Please login first. Session expired or not set.');
+      setScreen('auth');
       return;
     }
+
+    // ✅ ZUSÄTZLICHER CHECK: Session User ID
+    if (!session.user || !session.user.id) {
+      console.error('❌ Session has no user ID!');
+      alert('Invalid session. Please login again.');
+      setScreen('auth');
+      return;
+    }
+
+    console.log('✅ Session valid, user ID:', session.user.id);
 
     try {
       setLoading(true);
@@ -924,6 +944,13 @@ function App() {
           <h1 className="text-2xl font-bold mt-4" style={{ color: colors.primary, letterSpacing: '0.1em' }}>CIRQLE</h1>
           <p className="text-sm mt-2" style={{ color: colors.deepBlue }}>Make real friends in small groups</p>
         </div>
+        
+        {/* 🔥 DEBUG: Zeige Session-Status */}
+        {!session && (
+          <div className="mb-4 p-4 rounded-lg" style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
+            ⚠️ Warning: No active session detected. You may need to login again.
+          </div>
+        )}
         
         <h2 className="text-3xl font-bold mb-2" style={{ color: colors.deepBlue }}>Pick your interests</h2>
         <p className="text-gray-600 mb-8">Select at least 3 things you enjoy</p>
