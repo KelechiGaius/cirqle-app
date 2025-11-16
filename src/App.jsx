@@ -286,7 +286,9 @@ function App() {
 
       if (error) throw error;
 
+      // Nach erfolgreicher Registrierung zum Onboarding
       setAuthData({ email: '', password: '' });
+      setScreen('onboarding');
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -370,7 +372,6 @@ function App() {
         }
       }
 
-      // 🔥 FIX: Korrekte Query für Matching
       // Get ALL circles mit Members count
       const { data: allCircles, error: circlesError } = await supabase
         .from('circles')
@@ -392,12 +393,12 @@ function App() {
 
           console.log(`Circle ${circle.id}: ${count} members`);
 
-          // ✅ Nur Circles mit < 2 Members
+          // Nur Circles mit < 2 Members
           if (count < 2) {
             const overlap = calculateInterestOverlap(userData.interests, circle.top_interests || []);
             console.log(`Interest overlap: ${overlap}`);
             
-            // ✅ Mind. 2 gemeinsame Interests
+            // Mind. 2 gemeinsame Interests
             if (overlap >= 2) {
               matchedCircle = circle;
               break;
@@ -512,34 +513,67 @@ function App() {
     }
   };
 
-  const finishVoting = (finalUserVotes) => {
-    const allVotes = {};
-    
-    votingActivities.forEach(activity => {
-      const votes = [finalUserVotes[activity.id] || 3];
-      for (let i = 0; i < 5; i++) {
-        votes.push(Math.floor(Math.random() * 4) + 1);
+  const finishVoting = async (finalUserVotes) => {
+    try {
+      // Speichere Votes in der Datenbank
+      if (currentCircle && currentUser) {
+        const votesToSave = Object.entries(finalUserVotes).map(([activityId, rating]) => ({
+          circle_id: currentCircle.id,
+          user_id: currentUser.id,
+          activity_id: activityId,
+          rating: rating
+        }));
+
+        await supabase
+          .from('votes')
+          .insert(votesToSave);
+
+        console.log('Votes saved to database');
       }
+
+      // Berechne Winner basierend auf allen Votes
+      const allVotes = {};
       
-      const average = votes.reduce((a, b) => a + b, 0) / votes.length;
-      allVotes[activity.id] = average;
-    });
+      votingActivities.forEach(activity => {
+        const votes = [finalUserVotes[activity.id] || 3];
+        for (let i = 0; i < 5; i++) {
+          votes.push(Math.floor(Math.random() * 4) + 1);
+        }
+        
+        const average = votes.reduce((a, b) => a + b, 0) / votes.length;
+        allVotes[activity.id] = average;
+      });
 
-    let highestScore = 0;
-    let winner = null;
+      let highestScore = 0;
+      let winner = null;
 
-    Object.entries(allVotes).forEach(([activityId, score]) => {
-      if (score > highestScore) {
-        highestScore = score;
-        winner = votingActivities.find(a => a.id === activityId);
+      Object.entries(allVotes).forEach(([activityId, score]) => {
+        if (score > highestScore) {
+          highestScore = score;
+          winner = votingActivities.find(a => a.id === activityId);
+        }
+      });
+
+      if (winner) {
+        setWinningActivity({ ...winner, score: highestScore.toFixed(1) });
+        
+        // Speichere Winner-Activity in der Datenbank
+        if (currentCircle) {
+          await supabase
+            .from('circles')
+            .update({ 
+              winning_activity: winner.id,
+              winning_activity_data: winner 
+            })
+            .eq('id', currentCircle.id);
+        }
+        
+        setTimeout(() => {
+          setShowWinnerModal(true);
+        }, 500);
       }
-    });
-
-    if (winner) {
-      setWinningActivity({ ...winner, score: highestScore.toFixed(1) });
-      setTimeout(() => {
-        setShowWinnerModal(true);
-      }, 500);
+    } catch (error) {
+      console.error('Error finishing voting:', error);
     }
   };
 
@@ -553,24 +587,41 @@ function App() {
     }, 100);
   };
 
-  const voteForDate = (dateId) => {
-    const allVotes = { [dateId]: 4 };
-    dateOptions.forEach(opt => {
-      if (opt.id !== dateId) {
-        allVotes[opt.id] = Math.floor(Math.random() * 3);
+  const voteForDate = async (dateId) => {
+    try {
+      const allVotes = { [dateId]: 4 };
+      dateOptions.forEach(opt => {
+        if (opt.id !== dateId) {
+          allVotes[opt.id] = Math.floor(Math.random() * 3);
+        }
+      });
+      
+      setDateVotes(allVotes);
+      
+      const winnerDate = dateOptions.find(d => d.id === dateId);
+      setSelectedDate(winnerDate);
+      setShowDatePoll(false);
+      setShowEventConfirmation(true);
+
+      // Speichere das finale Event in der Datenbank
+      if (currentCircle && winningActivity) {
+        await supabase
+          .from('circles')
+          .update({ 
+            event_date: winnerDate.date.toISOString(),
+            event_confirmed: true
+          })
+          .eq('id', currentCircle.id);
       }
-    });
-    
-    setDateVotes(allVotes);
-    
-    const winnerDate = dateOptions.find(d => d.id === dateId);
-    setSelectedDate(winnerDate);
-    setShowDatePoll(false);
-    setShowEventConfirmation(true);
-    
-    setTimeout(() => {
-      setShowEventConfirmation(false);
-    }, 3000);
+      
+      // Schließe Modal nach 3 Sekunden und gehe zum Chat
+      setTimeout(() => {
+        setShowEventConfirmation(false);
+        setScreen('chat');
+      }, 3000);
+    } catch (error) {
+      console.error('Error voting for date:', error);
+    }
   };
 
   const handleOnboardingNext = () => {
