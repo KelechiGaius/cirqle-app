@@ -167,7 +167,6 @@ function App() {
           interests: data.interests || []
         });
         
-        // Check if user has a circle
         await loadUserCircle(userId);
         setScreen('home');
       } else {
@@ -181,7 +180,6 @@ function App() {
     }
   };
 
-  // Load user's circle
   const loadUserCircle = async (userId) => {
     try {
       const { data: membership, error } = await supabase
@@ -225,7 +223,6 @@ function App() {
     }
   };
 
-  // Subscribe to real-time messages
   useEffect(() => {
     if (!currentCircle) return;
 
@@ -273,7 +270,7 @@ function App() {
     }
   };
 
-  // Auth handlers
+  // 🔥 FIX 1: handleSignUp - Redirect zum Onboarding
   const handleSignUp = async () => {
     try {
       setAuthError('');
@@ -286,11 +283,12 @@ function App() {
 
       if (error) throw error;
 
-      // Nach erfolgreicher Registrierung zum Onboarding
       setAuthData({ email: '', password: '' });
-      setScreen('onboarding');
+      setScreen('onboarding');  // ✅ KRITISCH: Redirect zum Onboarding
+      console.log('✅ Registered successfully, redirecting to onboarding');
     } catch (error) {
       setAuthError(error.message);
+      console.error('❌ Registration error:', error);
     } finally {
       setLoading(false);
     }
@@ -308,8 +306,10 @@ function App() {
 
       if (error) throw error;
       setAuthData({ email: '', password: '' });
+      console.log('✅ Login successful');
     } catch (error) {
       setAuthError(error.message);
+      console.error('❌ Login error:', error);
     } finally {
       setLoading(false);
     }
@@ -338,7 +338,6 @@ function App() {
     try {
       setLoading(true);
 
-      // Check if user already exists
       let user = currentUser;
       
       if (!user) {
@@ -352,7 +351,6 @@ function App() {
           user = existingUser;
           setCurrentUser(user);
         } else {
-          // Create user profile
           const { data: newUser, error: userError } = await supabase
             .from('users')
             .insert([{
@@ -372,7 +370,6 @@ function App() {
         }
       }
 
-      // Get ALL circles mit Members count
       const { data: allCircles, error: circlesError } = await supabase
         .from('circles')
         .select('*')
@@ -382,10 +379,8 @@ function App() {
 
       let matchedCircle = null;
 
-      // Check each circle manually
       if (allCircles && allCircles.length > 0) {
         for (const circle of allCircles) {
-          // Count members für diesen Circle
           const { count } = await supabase
             .from('circle_members')
             .select('*', { count: 'exact', head: true })
@@ -393,12 +388,10 @@ function App() {
 
           console.log(`Circle ${circle.id}: ${count} members`);
 
-          // Nur Circles mit < 2 Members
           if (count < 2) {
             const overlap = calculateInterestOverlap(userData.interests, circle.top_interests || []);
             console.log(`Interest overlap: ${overlap}`);
             
-            // Mind. 2 gemeinsame Interests
             if (overlap >= 2) {
               matchedCircle = circle;
               break;
@@ -408,9 +401,8 @@ function App() {
       }
 
       if (matchedCircle) {
-        console.log('Matched circle found:', matchedCircle.id);
+        console.log('✅ Matched circle found:', matchedCircle.id);
         
-        // Join existing circle
         await supabase
           .from('circle_members')
           .insert([{
@@ -418,7 +410,6 @@ function App() {
             user_id: user.id
           }]);
 
-        // Load all members
         const { data: members } = await supabase
           .from('circle_members')
           .select(`
@@ -442,7 +433,6 @@ function App() {
       } else {
         console.log('No match found, creating new circle');
         
-        // Create new circle
         const topInterests = userData.interests.slice(0, 3);
 
         const { data: newCircle, error: createError } = await supabase
@@ -457,7 +447,6 @@ function App() {
 
         if (createError) throw createError;
 
-        // Add user to circle
         await supabase
           .from('circle_members')
           .insert([{
@@ -477,7 +466,6 @@ function App() {
         });
       }
 
-      // Generate activities
       const activities = [];
       const topInt = matchedCircle?.top_interests || userData.interests.slice(0, 3);
       topInt.forEach(interest => {
@@ -496,7 +484,7 @@ function App() {
       }, 3000);
 
     } catch (error) {
-      console.error('Error creating circle:', error);
+      console.error('❌ Error creating circle:', error);
       alert('Error: ' + error.message);
       setLoading(false);
     }
@@ -513,9 +501,12 @@ function App() {
     }
   };
 
+  // 🔥 FIX 2: finishVoting - Async + DB-Speicherung
   const finishVoting = async (finalUserVotes) => {
     try {
-      // Speichere Votes in der Datenbank
+      console.log('🔥 Starting finishVoting...');
+      
+      // Speichere Votes in DB
       if (currentCircle && currentUser) {
         const votesToSave = Object.entries(finalUserVotes).map(([activityId, rating]) => ({
           circle_id: currentCircle.id,
@@ -524,14 +515,18 @@ function App() {
           rating: rating
         }));
 
-        await supabase
+        const { error: votesError } = await supabase
           .from('votes')
           .insert(votesToSave);
 
-        console.log('Votes saved to database');
+        if (votesError) {
+          console.error('❌ Error saving votes:', votesError);
+        } else {
+          console.log('✅ Votes saved to database');
+        }
       }
 
-      // Berechne Winner basierend auf allen Votes
+      // Berechne Winner
       const allVotes = {};
       
       votingActivities.forEach(activity => {
@@ -555,25 +550,34 @@ function App() {
       });
 
       if (winner) {
+        console.log('✅ Winner found:', winner.title);
         setWinningActivity({ ...winner, score: highestScore.toFixed(1) });
         
-        // Speichere Winner-Activity in der Datenbank
+        // Speichere Winner in DB
         if (currentCircle) {
-          await supabase
+          const { error: winnerError } = await supabase
             .from('circles')
             .update({ 
               winning_activity: winner.id,
               winning_activity_data: winner 
             })
             .eq('id', currentCircle.id);
+
+          if (winnerError) {
+            console.error('❌ Error saving winner:', winnerError);
+          } else {
+            console.log('✅ Winner saved to database');
+          }
         }
         
         setTimeout(() => {
           setShowWinnerModal(true);
+          console.log('✅ Winner modal displayed');
         }, 500);
       }
     } catch (error) {
-      console.error('Error finishing voting:', error);
+      console.error('❌ Error in finishVoting:', error);
+      alert('Error finishing voting: ' + error.message);
     }
   };
 
@@ -584,11 +588,15 @@ function App() {
     setTimeout(() => {
       setShowDatePoll(true);
       setScreen('chat');
+      console.log('✅ Navigated to chat with date poll');
     }, 100);
   };
 
+  // 🔥 FIX 3: voteForDate - Async + Redirect zum Chat
   const voteForDate = async (dateId) => {
     try {
+      console.log('🔥 Starting voteForDate...');
+      
       const allVotes = { [dateId]: 4 };
       dateOptions.forEach(opt => {
         if (opt.id !== dateId) {
@@ -603,24 +611,32 @@ function App() {
       setShowDatePoll(false);
       setShowEventConfirmation(true);
 
-      // Speichere das finale Event in der Datenbank
+      // Speichere Event in DB
       if (currentCircle && winningActivity) {
-        await supabase
+        const { error: eventError } = await supabase
           .from('circles')
           .update({ 
             event_date: winnerDate.date.toISOString(),
             event_confirmed: true
           })
           .eq('id', currentCircle.id);
+
+        if (eventError) {
+          console.error('❌ Error saving event:', eventError);
+        } else {
+          console.log('✅ Event saved to database');
+        }
       }
       
-      // Schließe Modal nach 3 Sekunden und gehe zum Chat
+      // ✅ KRITISCH: Redirect zum Chat nach 3 Sekunden
       setTimeout(() => {
         setShowEventConfirmation(false);
         setScreen('chat');
+        console.log('✅ Redirected to chat screen');
       }, 3000);
     } catch (error) {
-      console.error('Error voting for date:', error);
+      console.error('❌ Error in voteForDate:', error);
+      alert('Error voting for date: ' + error.message);
     }
   };
 
@@ -716,7 +732,6 @@ function App() {
     </div>
   );
 
-  // MODALS
   const MatchingNotification = () => {
     if (!showMatchingNotification) return null;
     
@@ -784,7 +799,6 @@ function App() {
     );
   };
 
-  // SCREENS
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: colors.white }}>
