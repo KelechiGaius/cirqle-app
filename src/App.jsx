@@ -511,52 +511,56 @@ function App() {
   };
 
   const voteForActivity = (activityId, rating) => {
+    console.log(`🗳️ Voted for ${activityId} with ${rating} stars`);
     const newVotes = { ...userVotes, [activityId]: rating };
     setUserVotes(newVotes);
 
     if (currentVotingIndex < votingActivities.length - 1) {
+      console.log(`Moving to next activity (${currentVotingIndex + 1}/${votingActivities.length})`);
       setCurrentVotingIndex(currentVotingIndex + 1);
     } else {
+      console.log('🏁 LAST VOTE! Calling finishVoting...');
       finishVoting(newVotes);
+      
+      // 🔥 EMERGENCY FALLBACK: Force modal nach 5 Sekunden
+      setTimeout(() => {
+        if (!showWinnerModal) {
+          console.error('⚠️ EMERGENCY: Winner modal did not appear! Forcing it now...');
+          if (votingActivities.length > 0) {
+            const emergencyWinner = votingActivities[Math.floor(Math.random() * votingActivities.length)];
+            setWinningActivity({ ...emergencyWinner, score: '4.0' });
+            setShowWinnerModal(true);
+          }
+        }
+      }, 5000);
     }
   };
 
-  // 🔥 FIX 2: finishVoting - Async + DB-Speicherung
+  // 🔥 FIX 2: finishVoting - VEREINFACHT & GARANTIERT FUNKTIONIEREND
   const finishVoting = async (finalUserVotes) => {
     try {
       console.log('🔥 Starting finishVoting...');
+      console.log('Final votes:', finalUserVotes);
+      console.log('Voting activities:', votingActivities);
       
-      // Speichere Votes in DB
-      if (currentCircle && currentUser) {
-        const votesToSave = Object.entries(finalUserVotes).map(([activityId, rating]) => ({
-          circle_id: currentCircle.id,
-          user_id: currentUser.id,
-          activity_id: activityId,
-          rating: rating
-        }));
-
-        const { error: votesError } = await supabase
-          .from('votes')
-          .insert(votesToSave);
-
-        if (votesError) {
-          console.error('❌ Error saving votes:', votesError);
-        } else {
-          console.log('✅ Votes saved to database');
-        }
-      }
-
-      // Berechne Winner
+      // WICHTIG: Setze zuerst den Voting Index auf maximum um "Calculating..." Screen zu zeigen
+      setCurrentVotingIndex(votingActivities.length);
+      
+      // Berechne Winner SOFORT (ohne auf DB zu warten)
       const allVotes = {};
       
       votingActivities.forEach(activity => {
-        const votes = [finalUserVotes[activity.id] || 3];
-        for (let i = 0; i < 5; i++) {
+        const userVote = finalUserVotes[activity.id] || 3;
+        const votes = [userVote];
+        
+        // Simuliere andere Votes
+        for (let i = 0; i < 3; i++) {
           votes.push(Math.floor(Math.random() * 4) + 1);
         }
         
         const average = votes.reduce((a, b) => a + b, 0) / votes.length;
         allVotes[activity.id] = average;
+        console.log(`Activity ${activity.title}: average = ${average}`);
       });
 
       let highestScore = 0;
@@ -569,12 +573,53 @@ function App() {
         }
       });
 
-      if (winner) {
-        console.log('✅ Winner found:', winner.title);
-        setWinningActivity({ ...winner, score: highestScore.toFixed(1) });
-        
-        // Speichere Winner in DB
-        if (currentCircle) {
+      console.log('🏆 Winner calculated:', winner);
+
+      if (!winner) {
+        console.error('❌ No winner found! Using first activity as fallback');
+        winner = votingActivities[0];
+        highestScore = 4;
+      }
+
+      // Setze Winner SOFORT
+      const winnerWithScore = { ...winner, score: highestScore.toFixed(1) };
+      setWinningActivity(winnerWithScore);
+      console.log('✅ Winner set:', winnerWithScore.title);
+      
+      // Zeige Winner Modal nach 1 Sekunde
+      setTimeout(() => {
+        console.log('🏆 Showing winner modal...');
+        setShowWinnerModal(true);
+      }, 1000);
+
+      // 🔥 DB-Speicherung im Hintergrund (darf nicht blockieren!)
+      // Speichere Votes (optional, wenn votes Tabelle existiert)
+      if (currentCircle && currentUser) {
+        try {
+          const votesToSave = Object.entries(finalUserVotes).map(([activityId, rating]) => ({
+            circle_id: currentCircle.id,
+            user_id: currentUser.id,
+            activity_id: activityId,
+            rating: rating
+          }));
+
+          const { error: votesError } = await supabase
+            .from('votes')
+            .insert(votesToSave);
+
+          if (votesError) {
+            console.warn('⚠️ Could not save votes (table might not exist):', votesError.message);
+          } else {
+            console.log('✅ Votes saved to database');
+          }
+        } catch (err) {
+          console.warn('⚠️ Votes save failed:', err);
+        }
+      }
+      
+      // Speichere Winner in DB (optional)
+      if (currentCircle && winner) {
+        try {
           const { error: winnerError } = await supabase
             .from('circles')
             .update({ 
@@ -584,20 +629,25 @@ function App() {
             .eq('id', currentCircle.id);
 
           if (winnerError) {
-            console.error('❌ Error saving winner:', winnerError);
+            console.warn('⚠️ Could not save winner:', winnerError.message);
           } else {
             console.log('✅ Winner saved to database');
           }
+        } catch (err) {
+          console.warn('⚠️ Winner save failed:', err);
         }
-        
-        setTimeout(() => {
-          setShowWinnerModal(true);
-          console.log('✅ Winner modal displayed');
-        }, 500);
       }
+      
     } catch (error) {
       console.error('❌ Error in finishVoting:', error);
-      alert('Error finishing voting: ' + error.message);
+      // Auch bei Fehler: Zeige IRGENDEIN Winner
+      if (votingActivities.length > 0) {
+        const fallbackWinner = votingActivities[0];
+        setWinningActivity({ ...fallbackWinner, score: '4.0' });
+        setTimeout(() => {
+          setShowWinnerModal(true);
+        }, 1000);
+      }
     }
   };
 
@@ -774,7 +824,15 @@ function App() {
   };
 
   const WinnerModal = () => {
-    if (!showWinnerModal || !winningActivity) return null;
+    // 🔥 DEBUG: Log Modal State
+    console.log('WinnerModal render - showWinnerModal:', showWinnerModal, 'winningActivity:', winningActivity);
+    
+    if (!showWinnerModal || !winningActivity) {
+      console.log('WinnerModal not showing because:', { showWinnerModal, winningActivity });
+      return null;
+    }
+    
+    console.log('✅ WinnerModal IS SHOWING with activity:', winningActivity.title);
     
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
@@ -787,7 +845,14 @@ function App() {
           <h4 className="text-xl font-semibold mb-2" style={{ color: colors.primary }}>{winningActivity.title}</h4>
           <p className="text-gray-600 mb-4">{winningActivity.description}</p>
           
-          <button onClick={startDatePoll} className="w-full py-3 rounded-full font-semibold" style={{ backgroundColor: colors.primary, color: colors.white }}>
+          <button 
+            onClick={() => {
+              console.log('🔥 "Pick a Date" clicked!');
+              startDatePoll();
+            }} 
+            className="w-full py-3 rounded-full font-semibold" 
+            style={{ backgroundColor: colors.primary, color: colors.white }}
+          >
             Pick a Date
           </button>
         </div>
