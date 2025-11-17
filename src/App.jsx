@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageCircle, Users, User, MapPin, Send, ArrowLeft, Edit2, Check, Trophy, Star, Calendar, LogOut, Mail, Lock, Camera } from 'lucide-react';
+import { MessageCircle, Users, User, MapPin, Send, ArrowLeft, Edit2, Check, Trophy, Star, Calendar, LogOut, Mail, Lock, Camera, X } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 const colors = {
@@ -85,14 +85,12 @@ const generateDateOptions = () => {
 };
 
 function App() {
-  // Auth state
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authMode, setAuthMode] = useState('login');
   const [authData, setAuthData] = useState({ email: '', password: '' });
   const [authError, setAuthError] = useState('');
 
-  // App state
   const [screen, setScreen] = useState('welcome');
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [userData, setUserData] = useState({ name: '', age: '', photo: null, city: '', interests: [] });
@@ -112,11 +110,15 @@ function App() {
   const [showDatePoll, setShowDatePoll] = useState(false);
   const [showEventConfirmation, setShowEventConfirmation] = useState(false);
   const [bottomNav, setBottomNav] = useState('circle');
+  
+  // 🔥 NEU: Match Animation State
+  const [showMatchAnimation, setShowMatchAnimation] = useState(false);
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  
   const chatEndRef = useRef(null);
   const messagesSubscription = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Check session on mount
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -141,7 +143,6 @@ function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load user profile
   const loadUserProfile = async (userId) => {
     try {
       const { data, error } = await supabase
@@ -216,6 +217,8 @@ function App() {
             ...circle,
             members: membersList
           });
+          
+          console.log('✅ Circle loaded with members:', membersList);
         }
       }
     } catch (error) {
@@ -223,28 +226,46 @@ function App() {
     }
   };
 
+  // 🔥 FIX: Real-time messages subscription
   useEffect(() => {
-    if (!currentCircle) return;
+    if (!currentCircle) {
+      console.log('No circle, skipping messages subscription');
+      return;
+    }
 
+    console.log('🔥 Setting up real-time messages for circle:', currentCircle.id);
+    
     loadMessages();
 
-    messagesSubscription.current = supabase
+    const channel = supabase
       .channel(`messages:${currentCircle.id}`)
       .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `circle_id=eq.${currentCircle.id}` },
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'messages', 
+          filter: `circle_id=eq.${currentCircle.id}` 
+        },
         (payload) => {
+          console.log('✅ New message received:', payload.new);
           const newMessage = payload.new;
           setMessages(prev => [...prev, {
             id: newMessage.id,
             user: newMessage.user_name,
             text: newMessage.text,
+            userId: newMessage.user_id,
             timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }]);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Real-time subscription status:', status);
+      });
+
+    messagesSubscription.current = channel;
 
     return () => {
+      console.log('Cleaning up messages subscription');
       if (messagesSubscription.current) {
         supabase.removeChannel(messagesSubscription.current);
       }
@@ -254,23 +275,31 @@ function App() {
   const loadMessages = async () => {
     if (!currentCircle) return;
 
+    console.log('📨 Loading messages for circle:', currentCircle.id);
+    
     const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('circle_id', currentCircle.id)
       .order('created_at', { ascending: true });
 
+    if (error) {
+      console.error('❌ Error loading messages:', error);
+      return;
+    }
+
     if (data) {
+      console.log('✅ Messages loaded:', data.length);
       setMessages(data.map(m => ({
         id: m.id,
         user: m.user_name,
         text: m.text,
+        userId: m.user_id,
         timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       })));
     }
   };
 
-  // 🔥 FIX 1: handleSignUp - Redirect zum Onboarding + Session setzen
   const handleSignUp = async () => {
     try {
       setAuthError('');
@@ -283,7 +312,6 @@ function App() {
 
       if (error) throw error;
 
-      // ✅ WICHTIG: Setze Session sofort nach Registrierung
       if (data.session) {
         setSession(data.session);
         console.log('✅ Session set after registration:', data.session.user.id);
@@ -336,18 +364,15 @@ function App() {
   };
 
   const findAndCreateCircle = async () => {
-    // ✅ BESSERER CHECK: Zeige Details warum kein Login
     if (!session) {
       console.error('❌ No session found!');
-      console.log('Current session state:', session);
-      alert('Please login first. Session expired or not set.');
+      alert('Please login first. Session expired.');
       setScreen('auth');
       return;
     }
 
-    // ✅ ZUSÄTZLICHER CHECK: Session User ID
     if (!session.user || !session.user.id) {
-      console.error('❌ Session has no user ID!');
+      console.error('❌ Invalid session!');
       alert('Invalid session. Please login again.');
       setScreen('auth');
       return;
@@ -522,7 +547,6 @@ function App() {
       console.log('🏁 LAST VOTE! Calling finishVoting...');
       finishVoting(newVotes);
       
-      // 🔥 EMERGENCY FALLBACK: Force modal nach 5 Sekunden
       setTimeout(() => {
         if (!showWinnerModal) {
           console.error('⚠️ EMERGENCY: Winner modal did not appear! Forcing it now...');
@@ -536,31 +560,24 @@ function App() {
     }
   };
 
-  // 🔥 FIX 2: finishVoting - VEREINFACHT & GARANTIERT FUNKTIONIEREND
   const finishVoting = async (finalUserVotes) => {
     try {
       console.log('🔥 Starting finishVoting...');
-      console.log('Final votes:', finalUserVotes);
-      console.log('Voting activities:', votingActivities);
       
-      // WICHTIG: Setze zuerst den Voting Index auf maximum um "Calculating..." Screen zu zeigen
       setCurrentVotingIndex(votingActivities.length);
       
-      // Berechne Winner SOFORT (ohne auf DB zu warten)
       const allVotes = {};
       
       votingActivities.forEach(activity => {
         const userVote = finalUserVotes[activity.id] || 3;
         const votes = [userVote];
         
-        // Simuliere andere Votes
         for (let i = 0; i < 3; i++) {
           votes.push(Math.floor(Math.random() * 4) + 1);
         }
         
         const average = votes.reduce((a, b) => a + b, 0) / votes.length;
         allVotes[activity.id] = average;
-        console.log(`Activity ${activity.title}: average = ${average}`);
       });
 
       let highestScore = 0;
@@ -573,27 +590,21 @@ function App() {
         }
       });
 
-      console.log('🏆 Winner calculated:', winner);
-
       if (!winner) {
-        console.error('❌ No winner found! Using first activity as fallback');
+        console.error('❌ No winner found! Using first activity');
         winner = votingActivities[0];
         highestScore = 4;
       }
 
-      // Setze Winner SOFORT
       const winnerWithScore = { ...winner, score: highestScore.toFixed(1) };
       setWinningActivity(winnerWithScore);
       console.log('✅ Winner set:', winnerWithScore.title);
       
-      // Zeige Winner Modal nach 1 Sekunde
       setTimeout(() => {
         console.log('🏆 Showing winner modal...');
         setShowWinnerModal(true);
       }, 1000);
 
-      // 🔥 DB-Speicherung im Hintergrund (darf nicht blockieren!)
-      // Speichere Votes (optional, wenn votes Tabelle existiert)
       if (currentCircle && currentUser) {
         try {
           const votesToSave = Object.entries(finalUserVotes).map(([activityId, rating]) => ({
@@ -603,36 +614,23 @@ function App() {
             rating: rating
           }));
 
-          const { error: votesError } = await supabase
-            .from('votes')
-            .insert(votesToSave);
-
-          if (votesError) {
-            console.warn('⚠️ Could not save votes (table might not exist):', votesError.message);
-          } else {
-            console.log('✅ Votes saved to database');
-          }
+          await supabase.from('votes').insert(votesToSave);
+          console.log('✅ Votes saved');
         } catch (err) {
           console.warn('⚠️ Votes save failed:', err);
         }
       }
       
-      // Speichere Winner in DB (optional)
       if (currentCircle && winner) {
         try {
-          const { error: winnerError } = await supabase
+          await supabase
             .from('circles')
             .update({ 
               winning_activity: winner.id,
               winning_activity_data: winner 
             })
             .eq('id', currentCircle.id);
-
-          if (winnerError) {
-            console.warn('⚠️ Could not save winner:', winnerError.message);
-          } else {
-            console.log('✅ Winner saved to database');
-          }
+          console.log('✅ Winner saved');
         } catch (err) {
           console.warn('⚠️ Winner save failed:', err);
         }
@@ -640,29 +638,36 @@ function App() {
       
     } catch (error) {
       console.error('❌ Error in finishVoting:', error);
-      // Auch bei Fehler: Zeige IRGENDEIN Winner
       if (votingActivities.length > 0) {
         const fallbackWinner = votingActivities[0];
         setWinningActivity({ ...fallbackWinner, score: '4.0' });
-        setTimeout(() => {
-          setShowWinnerModal(true);
-        }, 1000);
+        setTimeout(() => setShowWinnerModal(true), 1000);
       }
     }
   };
 
+  // 🔥 NEU: Show Match Animation nach Winner
   const startDatePoll = () => {
+    console.log('Starting date poll...');
     const dates = generateDateOptions();
     setDateOptions(dates);
     setShowWinnerModal(false);
+    
+    // 🔥 ZEIGE MATCH ANIMATION
     setTimeout(() => {
-      setShowDatePoll(true);
-      setScreen('chat');
-      console.log('✅ Navigated to chat with date poll');
-    }, 100);
+      setShowMatchAnimation(true);
+      console.log('✅ Showing match animation');
+      
+      // Nach 3 Sekunden: Zeige Date Poll
+      setTimeout(() => {
+        setShowMatchAnimation(false);
+        setShowDatePoll(true);
+        setScreen('chat');
+        console.log('✅ Navigated to chat with date poll');
+      }, 3000);
+    }, 300);
   };
 
-  // 🔥 FIX 3: voteForDate - Async + Redirect zum Chat
   const voteForDate = async (dateId) => {
     try {
       console.log('🔥 Starting voteForDate...');
@@ -681,32 +686,24 @@ function App() {
       setShowDatePoll(false);
       setShowEventConfirmation(true);
 
-      // Speichere Event in DB
       if (currentCircle && winningActivity) {
-        const { error: eventError } = await supabase
+        await supabase
           .from('circles')
           .update({ 
             event_date: winnerDate.date.toISOString(),
             event_confirmed: true
           })
           .eq('id', currentCircle.id);
-
-        if (eventError) {
-          console.error('❌ Error saving event:', eventError);
-        } else {
-          console.log('✅ Event saved to database');
-        }
+        console.log('✅ Event saved');
       }
       
-      // ✅ KRITISCH: Redirect zum Chat nach 3 Sekunden
       setTimeout(() => {
         setShowEventConfirmation(false);
         setScreen('chat');
-        console.log('✅ Redirected to chat screen');
+        console.log('✅ Redirected to chat');
       }, 3000);
     } catch (error) {
-      console.error('❌ Error in voteForDate:', error);
-      alert('Error voting for date: ' + error.message);
+      console.error('❌ Error voting for date:', error);
     }
   };
 
@@ -755,22 +752,45 @@ function App() {
     }
   };
 
+  // 🔥 FIX: sendMessage mit Console Logs
   const sendMessage = async () => {
-    if (!messageInput.trim() || !currentCircle || !currentUser) return;
+    if (!messageInput.trim()) {
+      console.log('❌ Empty message');
+      return;
+    }
+    
+    if (!currentCircle) {
+      console.log('❌ No circle');
+      alert('Not in a circle');
+      return;
+    }
+    
+    if (!currentUser) {
+      console.log('❌ No user');
+      alert('Not logged in');
+      return;
+    }
+
+    console.log('📤 Sending message:', messageInput);
 
     try {
-      await supabase
+      const { data, error } = await supabase
         .from('messages')
         .insert([{
           circle_id: currentCircle.id,
           user_id: currentUser.id,
           user_name: currentUser.name,
           text: messageInput
-        }]);
+        }])
+        .select();
 
+      if (error) throw error;
+      
+      console.log('✅ Message sent successfully:', data);
       setMessageInput('');
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('❌ Error sending message:', error);
+      alert('Error sending message: ' + error.message);
     }
   };
 
@@ -823,12 +843,104 @@ function App() {
     );
   };
 
+  // 🔥 NEU: Match Animation Modal (zeigt matched User)
+  const MatchAnimationModal = () => {
+    if (!showMatchAnimation || !currentCircle) return null;
+    
+    const otherMembers = currentCircle.members.filter(m => m.id !== currentUser?.id);
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center animate-bounce-once">
+          <div className="text-6xl mb-4">🎉</div>
+          <h3 className="text-2xl font-bold mb-4" style={{ color: colors.deepBlue }}>You matched with!</h3>
+          
+          <div className="flex justify-center gap-4 mb-6">
+            {otherMembers.map((member, i) => (
+              <div key={i} className="text-center">
+                {member.photo && typeof member.photo === 'string' && member.photo.startsWith('data:') ? (
+                  <img 
+                    src={member.photo} 
+                    alt={member.name}
+                    className="w-24 h-24 rounded-full object-cover mx-auto mb-2 border-4"
+                    style={{ borderColor: colors.primary }}
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded-full flex items-center justify-center text-4xl mx-auto mb-2 border-4" 
+                    style={{ borderColor: colors.primary, backgroundColor: colors.background }}>
+                    {member.photo || '👤'}
+                  </div>
+                )}
+                <p className="font-bold" style={{ color: colors.primary }}>{member.name}</p>
+                <p className="text-sm text-gray-600">{member.age} years</p>
+              </div>
+            ))}
+          </div>
+          
+          <p className="text-gray-600">Let's pick a date for your activity!</p>
+        </div>
+      </div>
+    );
+  };
+
+  // 🔥 NEU: Members Modal (im Chat)
+  const MembersModal = () => {
+    if (!showMembersModal || !currentCircle) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-2xl font-bold" style={{ color: colors.deepBlue }}>Circle Members</h3>
+            <button onClick={() => setShowMembersModal(false)} className="p-2 rounded-full hover:bg-gray-100">
+              <X size={24} color={colors.deepBlue} />
+            </button>
+          </div>
+          
+          <div className="space-y-4">
+            {currentCircle.members.map((member, idx) => (
+              <div key={idx} className="flex items-center gap-4 p-4 rounded-2xl" style={{ backgroundColor: colors.background }}>
+                {member.photo && typeof member.photo === 'string' && member.photo.startsWith('data:') ? (
+                  <img 
+                    src={member.photo} 
+                    alt={member.name}
+                    className="w-16 h-16 rounded-full object-cover border-2"
+                    style={{ borderColor: colors.primary }}
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl border-2" 
+                    style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
+                    {member.photo || '👤'}
+                  </div>
+                )}
+                <div className="flex-1">
+                  <p className="font-bold text-lg" style={{ color: colors.deepBlue }}>{member.name}</p>
+                  <p className="text-sm text-gray-600">{member.age} years • {currentCircle.city}</p>
+                  {member.id === currentUser?.id && (
+                    <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>You</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <button 
+            onClick={() => setShowMembersModal(false)}
+            className="w-full mt-6 py-3 rounded-full font-semibold"
+            style={{ backgroundColor: colors.primary, color: colors.white }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const WinnerModal = () => {
-    // 🔥 DEBUG: Log Modal State
     console.log('WinnerModal render - showWinnerModal:', showWinnerModal, 'winningActivity:', winningActivity);
     
     if (!showWinnerModal || !winningActivity) {
-      console.log('WinnerModal not showing because:', { showWinnerModal, winningActivity });
+      console.log('WinnerModal not showing');
       return null;
     }
     
@@ -1010,10 +1122,9 @@ function App() {
           <p className="text-sm mt-2" style={{ color: colors.deepBlue }}>Make real friends in small groups</p>
         </div>
         
-        {/* 🔥 DEBUG: Zeige Session-Status */}
         {!session && (
           <div className="mb-4 p-4 rounded-lg" style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
-            ⚠️ Warning: No active session detected. You may need to login again.
+            ⚠️ Warning: No active session detected.
           </div>
         )}
         
@@ -1121,7 +1232,12 @@ function App() {
           <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
           <p className="text-sm text-gray-600">{currentCircle?.members.length || 0} members</p>
         </div>
-        <button onClick={() => setScreen('members')} className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: colors.primary }}>
+        {/* 🔥 NEU: Members Button */}
+        <button 
+          onClick={() => setShowMembersModal(true)} 
+          className="w-10 h-10 rounded-full flex items-center justify-center" 
+          style={{ backgroundColor: colors.primary }}
+        >
           <Users size={20} color={colors.white} />
         </button>
       </div>
@@ -1176,15 +1292,26 @@ function App() {
           </div>
         ) : (
           <div className="space-y-3">
-            {messages.map(msg => (
-              <div key={msg.id}>
-                <span className="text-xs text-gray-500 mb-1 block">{msg.user}</span>
-                <div className="p-3 rounded-3xl max-w-xs" style={{ backgroundColor: colors.white }}>
-                  <p style={{ color: colors.deepBlue }}>{msg.text}</p>
-                  <span className="text-xs text-gray-400 mt-1 block">{msg.timestamp}</span>
+            {messages.map(msg => {
+              const isOwnMessage = msg.userId === currentUser?.id;
+              return (
+                <div key={msg.id} className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+                  <span className="text-xs text-gray-500 mb-1">{msg.user}</span>
+                  <div 
+                    className="p-3 rounded-3xl max-w-xs" 
+                    style={{ 
+                      backgroundColor: isOwnMessage ? colors.primary : colors.white,
+                      color: isOwnMessage ? colors.white : colors.deepBlue
+                    }}
+                  >
+                    <p>{msg.text}</p>
+                    <span className={`text-xs mt-1 block ${isOwnMessage ? 'text-white opacity-75' : 'text-gray-400'}`}>
+                      {msg.timestamp}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={chatEndRef} />
           </div>
         )}
@@ -1192,35 +1319,22 @@ function App() {
 
       <div className="p-4" style={{ backgroundColor: colors.white }}>
         <div className="flex gap-2">
-          <input type="text" value={messageInput} onChange={(e) => setMessageInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="Type a message..." className="flex-1 px-4 py-3 rounded-full border-2" style={{ borderColor: colors.primary + '50' }} />
-          <button onClick={sendMessage} className="w-12 h-12 rounded-full flex items-center justify-center" style={{ backgroundColor: colors.primary }}>
+          <input 
+            type="text" 
+            value={messageInput} 
+            onChange={(e) => setMessageInput(e.target.value)} 
+            onKeyPress={(e) => e.key === 'Enter' && sendMessage()} 
+            placeholder="Type a message..." 
+            className="flex-1 px-4 py-3 rounded-full border-2" 
+            style={{ borderColor: colors.primary + '50' }} 
+          />
+          <button 
+            onClick={sendMessage} 
+            className="w-12 h-12 rounded-full flex items-center justify-center" 
+            style={{ backgroundColor: colors.primary }}
+          >
             <Send size={20} color={colors.white} />
           </button>
-        </div>
-      </div>
-      
-      <BottomNavigation />
-    </div>
-  );
-
-  if (screen === 'members') return (
-    <div className="min-h-screen pb-20" style={{ backgroundColor: colors.background }}>
-      <div className="px-6 py-4 shadow-sm flex items-center gap-3" style={{ backgroundColor: colors.white }}>
-        <button onClick={() => setScreen('chat')}>
-          <ArrowLeft size={24} color={colors.primary} />
-        </button>
-        <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Cirqle Members</h3>
-      </div>
-      
-      <div className="px-6 py-8">
-        <div className="grid grid-cols-2 gap-4">
-          {currentCircle?.members.map((member, idx) => (
-            <div key={idx} className="p-6 rounded-3xl text-center" style={{ backgroundColor: colors.white }}>
-              <div className="text-5xl mb-3">{member.photo}</div>
-              <p className="font-semibold mb-1" style={{ color: colors.deepBlue }}>{member.name}</p>
-              <p className="text-sm text-gray-500">{member.age} years</p>
-            </div>
-          ))}
         </div>
       </div>
       
@@ -1304,9 +1418,12 @@ function App() {
     <div className="font-sans">
       <MatchingNotification />
       <WinnerModal />
+      <MatchAnimationModal />
+      <MembersModal />
       <EventConfirmationModal />
     </div>
   );
 }
 
 export default App;
+
