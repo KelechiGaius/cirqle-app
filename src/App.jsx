@@ -257,12 +257,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (!currentCircle) {
-      console.log('No circle, skipping messages subscription');
-      return;
-    }
-
-    console.log('🔥 Setting up real-time messages for circle:', currentCircle.id);
+    if (!currentCircle?.id) return;
     
     loadMessages();
 
@@ -276,30 +271,26 @@ function App() {
           filter: `circle_id=eq.${currentCircle.id}` 
         },
         (payload) => {
-          console.log('✅ New message received:', payload.new);
           const newMessage = payload.new;
-          setMessages(prev => [...prev, {
-            id: newMessage.id,
-            user: newMessage.sender_name || 'Unknown',
-            text: newMessage.text,
-            userId: newMessage.user_id,
-            timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }]);
+          setMessages(prev => {
+            // Prevent duplicates
+            if (prev.some(m => m.id === newMessage.id)) return prev;
+            return [...prev, {
+              id: newMessage.id,
+              user: newMessage.sender_name || 'Unknown',
+              text: newMessage.text,
+              userId: newMessage.user_id,
+              timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }];
+          });
         }
       )
-      .subscribe((status) => {
-        console.log('Real-time subscription status:', status);
-      });
-
-    messagesSubscription.current = channel;
+      .subscribe();
 
     return () => {
-      console.log('Cleaning up messages subscription');
-      if (messagesSubscription.current) {
-        supabase.removeChannel(messagesSubscription.current);
-      }
+      supabase.removeChannel(channel);
     };
-  }, [currentCircle]);
+  }, [currentCircle?.id]);
 
   const loadMessages = async () => {
     if (!currentCircle) return;
