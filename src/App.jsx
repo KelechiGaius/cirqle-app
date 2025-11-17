@@ -341,13 +341,10 @@ function App() {
 
       if (error) throw error;
 
-      if (data.session) {
-        setSession(data.session);
-        console.log('✅ Session set after registration:', data.session.user.id);
-      }
-
       setAuthData({ email: '', password: '' });
+      setOnboardingStep(0); // Reset onboarding
       setScreen('onboarding');
+      setLoading(false);
       console.log('✅ Registered successfully, redirecting to onboarding');
     } catch (error) {
       setAuthError(error.message);
