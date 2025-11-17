@@ -1445,7 +1445,6 @@ function App() {
       <MatchingNotification />
       <WinnerModal />
       <MatchAnimationModal />
-     <MembersModal isOpen={showMembersModal} onClose={() => setShowMembersModal(false)} />
       <EventConfirmationModal />
     </div>
   );
