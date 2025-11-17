@@ -1434,8 +1434,7 @@ function App() {
       <MatchingNotification />
       <WinnerModal />
       <MatchAnimationModal />
-     {showMembersModal && alert('🔥 RENDERING MEMBERS MODAL! showMembersModal = ' + showMembersModal)}
-      <MembersModal />
+     <MembersModal isOpen={showMembersModal} onClose={() => setShowMembersModal(false)} />
       <EventConfirmationModal />
     </div>
   );
