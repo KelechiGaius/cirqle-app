@@ -1262,7 +1262,7 @@ function App() {
             console.log('members:', currentCircle?.members);
             setShowMembersModal(true);
           }}
-          className="w-10 h-10 rounded-full flex items-center justify-center" 
+          className="w-10 h-10 rounded-full flex items-center justify-center"
           style={{ backgroundColor: colors.primary }}
         >
           <Users size={20} color={colors.white} />
