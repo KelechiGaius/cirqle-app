@@ -1217,7 +1217,7 @@ function App() {
                   {member.photo || '👤'}
                 </div>
                 <div className="flex-1">
-                  <p className="font-bold" style={{ color: colors.deepBlue }}>{member.name}</p>
+                  <p className="font-bold" style={{ color: colors.deepBlue }}>{member.name || 'Member'}</p>
                   <p className="text-xs text-gray-600">{member.age} years • {currentCircle.city}</p>
                 </div>
                 {member.id === currentUser?.id && (
