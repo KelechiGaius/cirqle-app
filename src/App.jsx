@@ -1454,7 +1454,7 @@ function App() {
       <MatchingNotification />
       <WinnerModal />
       <MatchAnimationModal />
-      {console.log('🔥 Trying to render MembersModal, showMembersModal =', showMembersModal)}
+     {showMembersModal && alert('🔥 RENDERING MEMBERS MODAL! showMembersModal = ' + showMembersModal)}
       <MembersModal />
       <EventConfirmationModal />
     </div>
