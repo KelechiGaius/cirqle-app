@@ -1238,26 +1238,37 @@ function App() {
 
   if (screen === 'chat') return (
     <div className="h-screen flex flex-col pb-20" style={{ backgroundColor: colors.background }}>
-      <div className="px-6 py-4 shadow-sm flex items-center gap-3" style={{ backgroundColor: colors.white }}>
-        <div className="flex-1">
-          <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
-          <p className="text-sm text-gray-600">{currentCircle?.members.length || 0} members</p>
-        </div>
-        <button
-          onClick={() => {
-            console.log('🔥 BUTTON CLICKED!');
-            console.log('currentCircle:', currentCircle);
-            console.log('members:', currentCircle?.members);
-            setShowMembersModal(true);
-          }}
-          className="w-10 h-10 rounded-full flex items-center justify-center"
-          style={{ backgroundColor: colors.primary }}
-        >
-          <Users size={20} color={colors.white} />
-        </button>
+      <div className="px-6 py-4 shadow-sm" style={{ backgroundColor: colors.white }}>
+        <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
+        <p className="text-sm text-gray-600">{currentCircle?.members.length || 0} members</p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
+        {/* 🔥 MEMBERS ANGEZEIGT DIREKT IM CHAT! */}
+        <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.white }}>
+          <h4 className="font-semibold mb-4 flex items-center gap-2" style={{ color: colors.deepBlue }}>
+            <Users size={20} color={colors.primary} />
+            Circle Members
+          </h4>
+          <div className="space-y-3">
+            {currentCircle?.members.map((member, idx) => (
+              <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl" style={{ backgroundColor: colors.background }}>
+                <div className="w-12 h-12 rounded-full flex items-center justify-center text-2xl border-2" 
+                  style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
+                  {member.photo || '👤'}
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold" style={{ color: colors.deepBlue }}>{member.name}</p>
+                  <p className="text-xs text-gray-600">{member.age} years • {currentCircle.city}</p>
+                </div>
+                {member.id === currentUser?.id && (
+                  <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>You</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
         {winningActivity && selectedDate && (
           <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.primary }}>
             <div className="flex items-center gap-3 mb-3">
