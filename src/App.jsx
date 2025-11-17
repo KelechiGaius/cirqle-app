@@ -907,23 +907,15 @@ function App() {
     );
   };
 
-  const MembersModal = () => {
-    console.log('🔍 MembersModal render - showMembersModal:', showMembersModal);
-    console.log('🔍 MembersModal render - currentCircle:', currentCircle);
-    console.log('🔍 MembersModal render - members:', currentCircle?.members);
-    
-    if (!showMembersModal || !currentCircle) {
-      console.log('❌ MembersModal: NOT rendering. showMembersModal =', showMembersModal, 'currentCircle =', currentCircle);
-      return null;
-    }
-    console.log('✅ MembersModal: RENDERING!');
+  const MembersModal = ({ isOpen, onClose }) => {
+    if (!isOpen || !currentCircle) return null;
     
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full">
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4" onClick={onClose}>
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-2xl font-bold" style={{ color: colors.deepBlue }}>Circle Members</h3>
-            <button onClick={() => setShowMembersModal(false)} className="p-2 rounded-full hover:bg-gray-100">
+            <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
               <X size={24} color={colors.deepBlue} />
             </button>
           </div>
@@ -931,32 +923,20 @@ function App() {
           <div className="space-y-4">
             {currentCircle.members.map((member, idx) => (
               <div key={idx} className="flex items-center gap-4 p-4 rounded-2xl" style={{ backgroundColor: colors.background }}>
-                {member.photo && typeof member.photo === 'string' && member.photo.startsWith('data:') ? (
-                  <img 
-                    src={member.photo} 
-                    alt={member.name}
-                    className="w-16 h-16 rounded-full object-cover border-2"
-                    style={{ borderColor: colors.primary }}
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl border-2" 
-                    style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
-                    {member.photo || '👤'}
-                  </div>
-                )}
+                <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl border-2" 
+                  style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
+                  {member.photo || '👤'}
+                </div>
                 <div className="flex-1">
                   <p className="font-bold text-lg" style={{ color: colors.deepBlue }}>{member.name}</p>
                   <p className="text-sm text-gray-600">{member.age} years • {currentCircle.city}</p>
-                  {member.id === currentUser?.id && (
-                    <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>You</span>
-                  )}
                 </div>
               </div>
             ))}
           </div>
           
           <button 
-            onClick={() => setShowMembersModal(false)}
+            onClick={onClose}
             className="w-full mt-6 py-3 rounded-full font-semibold"
             style={{ backgroundColor: colors.primary, color: colors.white }}
           >
