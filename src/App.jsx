@@ -111,7 +111,6 @@ function App() {
   const [showEventConfirmation, setShowEventConfirmation] = useState(false);
   const [bottomNav, setBottomNav] = useState('circle');
   
-  // 🔥 NEU: Match Animation State
   const [showMatchAnimation, setShowMatchAnimation] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
   
@@ -183,50 +182,81 @@ function App() {
 
   const loadUserCircle = async (userId) => {
     try {
-      const { data: membership, error } = await supabase
+      console.log('🔍 Loading circle for user:', userId);
+      
+      const { data: membership, error: memberError } = await supabase
         .from('circle_members')
         .select('circle_id')
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (membership) {
-        const { data: circle } = await supabase
-          .from('circles')
-          .select('*')
-          .eq('id', membership.circle_id)
-          .single();
-
-        if (circle) {
-          const { data: members } = await supabase
-            .from('circle_members')
-            .select(`
-              user_id,
-              users (*)
-            `)
-            .eq('circle_id', circle.id);
-
-          const membersList = members?.map(m => ({
-            id: m.users.id,
-            name: m.users.name,
-            age: m.users.age,
-            photo: m.users.photo_url,
-            interests: m.users.interests
-          })) || [];
-
-          setCurrentCircle({
-            ...circle,
-            members: membersList
-          });
-          
-          console.log('✅ Circle loaded with members:', membersList);
-        }
+      if (memberError) {
+        console.error('Error loading membership:', memberError);
+        return;
       }
+
+      if (!membership) {
+        console.log('No circle membership found');
+        return;
+      }
+
+      console.log('✅ Found circle_id:', membership.circle_id);
+
+      const { data: circle, error: circleError } = await supabase
+        .from('circles')
+        .select('*')
+        .eq('id', membership.circle_id)
+        .single();
+
+      if (circleError) {
+        console.error('Error loading circle:', circleError);
+        return;
+      }
+
+      console.log('✅ Circle loaded:', circle);
+
+      const { data: membersData, error: membersError } = await supabase
+        .from('circle_members')
+        .select(`
+          user_id,
+          users (
+            id,
+            name,
+            age,
+            photo_url,
+            interests
+          )
+        `)
+        .eq('circle_id', membership.circle_id);
+
+      if (membersError) {
+        console.error('Error loading members:', membersError);
+        return;
+      }
+
+      console.log('✅ Raw members data:', membersData);
+
+      const membersList = membersData?.map(m => ({
+        id: m.users.id,
+        name: m.users.name,
+        age: m.users.age,
+        photo: m.users.photo_url,
+        interests: m.users.interests
+      })) || [];
+
+      console.log('✅ Processed members list:', membersList);
+
+      setCurrentCircle({
+        ...circle,
+        members: membersList
+      });
+      
+      console.log('✅ Circle set with', membersList.length, 'members');
     } catch (error) {
-      console.error('Error loading circle:', error);
+      console.error('❌ Error in loadUserCircle:', error);
     }
   };
 
-  // 🔥 FIX: Real-time messages subscription
   useEffect(() => {
     if (!currentCircle) {
       console.log('No circle, skipping messages subscription');
@@ -251,7 +281,7 @@ function App() {
           const newMessage = payload.new;
           setMessages(prev => [...prev, {
             id: newMessage.id,
-            user: newMessage.user_name,
+            user: newMessage.sender_name || 'Unknown',
             text: newMessage.text,
             userId: newMessage.user_id,
             timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -292,7 +322,7 @@ function App() {
       console.log('✅ Messages loaded:', data.length);
       setMessages(data.map(m => ({
         id: m.id,
-        user: m.user_name,
+        user: m.sender_name || 'Unknown',
         text: m.text,
         userId: m.user_id,
         timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -534,7 +564,6 @@ function App() {
       setLoading(false);
     }
   };
-
   const voteForActivity = (activityId, rating) => {
     console.log(`🗳️ Voted for ${activityId} with ${rating} stars`);
     const newVotes = { ...userVotes, [activityId]: rating };
@@ -646,19 +675,16 @@ function App() {
     }
   };
 
-  // 🔥 NEU: Show Match Animation nach Winner
   const startDatePoll = () => {
     console.log('Starting date poll...');
     const dates = generateDateOptions();
     setDateOptions(dates);
     setShowWinnerModal(false);
     
-    // 🔥 ZEIGE MATCH ANIMATION
     setTimeout(() => {
       setShowMatchAnimation(true);
       console.log('✅ Showing match animation');
       
-      // Nach 3 Sekunden: Zeige Date Poll
       setTimeout(() => {
         setShowMatchAnimation(false);
         setShowDatePoll(true);
@@ -752,7 +778,6 @@ function App() {
     }
   };
 
-  // 🔥 FIX: sendMessage mit Console Logs
   const sendMessage = async () => {
     if (!messageInput.trim()) {
       console.log('❌ Empty message');
@@ -779,7 +804,7 @@ function App() {
         .insert([{
           circle_id: currentCircle.id,
           user_id: currentUser.id,
-          user_name: currentUser.name,
+          sender_name: currentUser.name,
           text: messageInput
         }])
         .select();
@@ -843,7 +868,6 @@ function App() {
     );
   };
 
-  // 🔥 NEU: Match Animation Modal (zeigt matched User)
   const MatchAnimationModal = () => {
     if (!showMatchAnimation || !currentCircle) return null;
     
@@ -883,7 +907,6 @@ function App() {
     );
   };
 
-  // 🔥 NEU: Members Modal (im Chat)
   const MembersModal = () => {
     if (!showMembersModal || !currentCircle) return null;
     
@@ -1232,7 +1255,6 @@ function App() {
           <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
           <p className="text-sm text-gray-600">{currentCircle?.members.length || 0} members</p>
         </div>
-        {/* 🔥 NEU: Members Button */}
         <button 
           onClick={() => setShowMembersModal(true)} 
           className="w-10 h-10 rounded-full flex items-center justify-center" 
