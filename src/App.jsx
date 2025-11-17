@@ -908,6 +908,10 @@ function App() {
   };
 
   const MembersModal = () => {
+    console.log('🔍 MembersModal render - showMembersModal:', showMembersModal);
+    console.log('🔍 MembersModal render - currentCircle:', currentCircle);
+    console.log('🔍 MembersModal render - members:', currentCircle?.members);
+    
     if (!showMembersModal || !currentCircle) return null;
     
     return (
