@@ -112,7 +112,6 @@ function App() {
   const [bottomNav, setBottomNav] = useState('circle');
   
   const [showMatchAnimation, setShowMatchAnimation] = useState(false);
-  const [showMembersModal, setShowMembersModal] = useState(false);
   
   const chatEndRef = useRef(null);
   const messagesSubscription = useRef(null);
