@@ -912,7 +912,11 @@ function App() {
     console.log('🔍 MembersModal render - currentCircle:', currentCircle);
     console.log('🔍 MembersModal render - members:', currentCircle?.members);
     
-    if (!showMembersModal || !currentCircle) return null;
+    if (!showMembersModal || !currentCircle) {
+      console.log('❌ MembersModal: NOT rendering. showMembersModal =', showMembersModal, 'currentCircle =', currentCircle);
+      return null;
+    }
+    console.log('✅ MembersModal: RENDERING!');
     
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
@@ -1450,6 +1454,7 @@ function App() {
       <MatchingNotification />
       <WinnerModal />
       <MatchAnimationModal />
+      {console.log('🔥 Trying to render MembersModal, showMembersModal =', showMembersModal)}
       <MembersModal />
       <EventConfirmationModal />
     </div>
