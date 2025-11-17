@@ -677,16 +677,17 @@ function App() {
     setDateOptions(dates);
     setShowWinnerModal(false);
     
-    // Show match animation immediately
-    setShowMatchAnimation(true);
-    console.log('✅ Showing match animation');
-    
     setTimeout(() => {
-      setShowMatchAnimation(false);
-      setShowDatePoll(true);
-      setScreen('chat');
-      console.log('✅ Navigated to chat with date poll');
-    }, 3000);
+      setShowMatchAnimation(true);
+      console.log('✅ Showing match animation');
+      
+      setTimeout(() => {
+        setShowMatchAnimation(false);
+        setShowDatePoll(true);
+        setScreen('chat');
+        console.log('✅ Navigated to chat with date poll');
+      }, 3000);
+    }, 300);
   };
 
   const voteForDate = async (dateId) => {
