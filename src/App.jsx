@@ -906,46 +906,6 @@ function App() {
     );
   };
 
-  const MembersModal = ({ isOpen, onClose }) => {
-    if (!isOpen || !currentCircle) return null;
-    
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4" onClick={onClose}>
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-2xl font-bold" style={{ color: colors.deepBlue }}>Circle Members</h3>
-            <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
-              <X size={24} color={colors.deepBlue} />
-            </button>
-          </div>
-          
-          <div className="space-y-4">
-            {currentCircle.members.map((member, idx) => (
-              <div key={idx} className="flex items-center gap-4 p-4 rounded-2xl" style={{ backgroundColor: colors.background }}>
-                <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl border-2" 
-                  style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
-                  {member.photo || '👤'}
-                </div>
-                <div className="flex-1">
-                  <p className="font-bold text-lg" style={{ color: colors.deepBlue }}>{member.name}</p>
-                  <p className="text-sm text-gray-600">{member.age} years • {currentCircle.city}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          <button 
-            onClick={onClose}
-            className="w-full mt-6 py-3 rounded-full font-semibold"
-            style={{ backgroundColor: colors.primary, color: colors.white }}
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    );
-  };
-
   const WinnerModal = () => {
     console.log('WinnerModal render - showWinnerModal:', showWinnerModal, 'winningActivity:', winningActivity);
     
