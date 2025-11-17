@@ -1200,7 +1200,7 @@ function App() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        {/* 🔥 MEMBERS ANGEZEIGT DIREKT IM CHAT! */}
+       {/* 🔥 MEMBERS IM CHAT */}
         <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.white }}>
           <h4 className="font-semibold mb-4 flex items-center gap-2" style={{ color: colors.deepBlue }}>
             <Users size={20} color={colors.primary} />
