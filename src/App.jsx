@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageCircle, Users, User, MapPin, Send, ArrowLeft, Edit2, Check, Trophy, Star, Calendar, LogOut, Mail, Lock, Camera, X } from 'lucide-react';
+import { MessageCircle, Users, User, MapPin, Send, ArrowLeft, Edit2, Check, Trophy, Star, Calendar, LogOut, Mail, Lock, Camera, X, Image as ImageIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 const colors = {
@@ -260,7 +260,7 @@ function App() {
     }
   };
 
-  // 🔥 Real-time Chat: Subscription + Polling-Fallback für Live-Updates
+  // Real-time Chat
   useEffect(() => {
     if (!currentCircle?.id) return;
     
@@ -330,7 +330,7 @@ function App() {
     };
   }, [currentCircle?.id]);
 
-  // Polling-Fallback: neue Nachrichten auch ohne Realtime (z.B. wenn Replication aus ist)
+  // Polling Fallback
   useEffect(() => {
     const circleId = currentCircle?.id;
     if (screen !== 'chat' || !circleId) return;
@@ -354,29 +354,6 @@ function App() {
     return () => clearInterval(interval);
   }, [screen, currentCircle?.id]);
 
-  const loadMessages = async () => {
-    if (!currentCircle) return;
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('circle_id', currentCircle.id)
-      .order('created_at', { ascending: true });
-    if (error) {
-      console.error('❌ Error loading messages:', error);
-      return;
-    }
-    if (data) {
-      setMessages(data.map(m => ({
-        id: m.id,
-        user: m.sender_name || 'Unknown',
-        text: m.text ?? '',
-        image_url: m.image_url ?? null,
-        userId: m.user_id,
-        timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      })));
-    }
-  };
-
   const handleSignUp = async () => {
     try {
       setAuthError('');
@@ -393,7 +370,7 @@ function App() {
       setOnboardingStep(0);
       setScreen('onboarding');
       setLoading(false);
-      console.log('✅ Registered successfully, redirecting to onboarding');
+      console.log('✅ Registered successfully');
     } catch (error) {
       setAuthError(error.message);
       console.error('❌ Registration error:', error);
@@ -796,7 +773,6 @@ function App() {
     }
   };
 
-  // 🔥 FIX: Photo Upload mit Supabase Storage
   const handlePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -804,12 +780,10 @@ function App() {
     try {
       console.log('📸 Uploading photo...');
       
-      // Create unique filename
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random()}.${fileExt}`;
       const filePath = `${session.user.id}/${fileName}`;
 
-      // Upload to Supabase Storage
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(filePath, file);
@@ -819,7 +793,6 @@ function App() {
         throw uploadError;
       }
 
-      // Get public URL
       const { data: urlData } = supabase.storage
         .from('avatars')
         .getPublicUrl(filePath);
@@ -830,7 +803,6 @@ function App() {
     } catch (error) {
       console.error('❌ Photo upload error:', error);
       alert('Error uploading photo. Using emoji instead.');
-      // Fallback to file reader for local preview
       const reader = new FileReader();
       reader.onloadend = () => {
         setUserData({ ...userData, photo: '👤' });
@@ -908,7 +880,18 @@ function App() {
         <span className="text-xs font-medium">Home</span>
       </button>
       
-      <button onClick={() => { setBottomNav('circle'); currentCircle && setScreen('chat'); }} className="flex flex-col items-center gap-1" style={{ color: bottomNav === 'circle' ? colors.primary : '#9CA3AF' }}>
+      <button 
+        onClick={() => { 
+          setBottomNav('circle'); 
+          if (currentCircle) {
+            setScreen('chat');
+          } else {
+            alert('Du bist noch in keinem Circle. Erstelle zuerst einen!');
+          }
+        }} 
+        className="flex flex-col items-center gap-1" 
+        style={{ color: bottomNav === 'circle' ? colors.primary : '#9CA3AF' }}
+      >
         <CircleLogo size={28} color={bottomNav === 'circle' ? colors.primary : '#9CA3AF'} />
         <span className="text-xs font-medium">Circle</span>
       </button>
@@ -978,16 +961,16 @@ function App() {
     };
 
     return (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4" style={{ animation: 'matchRevealFadeIn 0.3s ease-out' }}>
-        <div className="bg-white rounded-3xl p-6 max-w-md w-full overflow-hidden" style={{ animation: 'matchRevealScaleIn 0.35s ease-out' }}>
+      <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-3xl p-6 max-w-md w-full">
           <div className="text-center mb-2">
             <span className="text-4xl">🎉</span>
-            <h3 className="text-xl font-bold mt-2" style={{ color: colors.deepBlue }}>Du hast gematched mit</h3>
-            <p className="text-sm text-gray-500">Swipe für nächste Person · {index + 1} / {total}</p>
+            <h3 className="text-xl font-bold mt-2" style={{ color: colors.deepBlue }}>You matched with</h3>
+            <p className="text-sm text-gray-500">Swipe for next · {index + 1} / {total}</p>
           </div>
 
           <div
-            className="relative overflow-hidden rounded-2xl mx-auto touch-pan-y"
+            className="relative overflow-hidden rounded-2xl mx-auto"
             style={{ minHeight: 320 }}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
@@ -995,7 +978,7 @@ function App() {
             onTouchCancel={handleTouchEnd}
           >
             {otherMembers.length === 0 ? (
-              <div className="py-12 text-gray-500">Keine anderen Mitglieder in diesem Circle.</div>
+              <div className="py-12 text-gray-500">No other members in this circle yet.</div>
             ) : (
               <div
                 className="flex transition-transform duration-300 ease-out"
@@ -1007,7 +990,7 @@ function App() {
                 {otherMembers.map((m, i) => {
                   const shared = (m.interests || []).filter((x) => myInterests.includes(x));
                   return (
-                    <div key={m.id} className="flex-shrink-0 w-full max-w-full px-1" style={{ width: `${100 / total}%` }}>
+                    <div key={m.id} className="flex-shrink-0 w-full px-1" style={{ width: `${100 / total}%` }}>
                       <div className="rounded-2xl border-2 p-4 text-center" style={{ borderColor: colors.primary + '40', backgroundColor: colors.background }}>
                         {m.photo && typeof m.photo === 'string' && m.photo.startsWith('http') ? (
                           <img src={m.photo} alt={m.name} className="w-28 h-28 rounded-full object-cover mx-auto mb-3 border-4" style={{ borderColor: colors.primary }} />
@@ -1017,10 +1000,10 @@ function App() {
                           </div>
                         )}
                         <p className="font-bold text-lg" style={{ color: colors.deepBlue }}>{m.name}</p>
-                        <p className="text-sm text-gray-600">{m.age} Jahre</p>
+                        <p className="text-sm text-gray-600">{m.age} years</p>
                         {shared.length > 0 && (
                           <div className="mt-3">
-                            <p className="text-xs font-medium text-gray-500 mb-1">Gemeinsame Interessen</p>
+                            <p className="text-xs font-medium text-gray-500 mb-1">Shared Interests</p>
                             <div className="flex flex-wrap justify-center gap-1">
                               {shared.slice(0, 5).map((s, j) => (
                                 <span key={j} className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: colors.primary + '25', color: colors.primary }}>
@@ -1065,7 +1048,7 @@ function App() {
               className="p-2 rounded-full min-w-[44px] flex items-center justify-center"
               style={{ backgroundColor: colors.primary, color: colors.white }}
             >
-              {index < total - 1 ? <ChevronRight size={24} /> : 'Weiter'}
+              {index < total - 1 ? <ChevronRight size={24} /> : 'Next'}
             </button>
           </div>
 
@@ -1076,7 +1059,7 @@ function App() {
               className="w-full mt-3 py-2.5 rounded-full text-sm font-medium"
               style={{ backgroundColor: colors.primary + '20', color: colors.primary }}
             >
-              Datum wählen →
+              Pick Date →
             </button>
           )}
         </div>
@@ -1085,14 +1068,7 @@ function App() {
   };
 
   const WinnerModal = () => {
-    console.log('WinnerModal render - showWinnerModal:', showWinnerModal, 'winningActivity:', winningActivity);
-    
-    if (!showWinnerModal || !winningActivity) {
-      console.log('WinnerModal not showing');
-      return null;
-    }
-    
-    console.log('✅ WinnerModal IS SHOWING with activity:', winningActivity.title);
+    if (!showWinnerModal || !winningActivity) return null;
     
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
@@ -1106,10 +1082,7 @@ function App() {
           <p className="text-gray-600 mb-4">{winningActivity.description}</p>
           
           <button 
-            onClick={() => {
-              console.log('🔥 "Pick a Date" clicked!');
-              startDatePoll();
-            }} 
+            onClick={startDatePoll} 
             className="w-full py-3 rounded-full font-semibold" 
             style={{ backgroundColor: colors.primary, color: colors.white }}
           >
@@ -1276,12 +1249,6 @@ function App() {
           <p className="text-sm mt-2" style={{ color: colors.deepBlue }}>Make real friends in small groups</p>
         </div>
         
-        {!session && (
-          <div className="mb-4 p-4 rounded-lg" style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
-            ⚠️ Warning: No active session detected.
-          </div>
-        )}
-        
         <h2 className="text-3xl font-bold mb-2" style={{ color: colors.deepBlue }}>Pick your interests</h2>
         <p className="text-gray-600 mb-8">Select at least 3 things you enjoy</p>
 
@@ -1322,7 +1289,7 @@ function App() {
               className="px-6 py-3 rounded-full text-sm font-medium"
               style={{ backgroundColor: colors.primary + '25', color: colors.primary }}
             >
-              Weiter – falls nichts passiert
+              Continue if nothing happens
             </button>
           </div>
           <WinnerModal />
@@ -1387,190 +1354,190 @@ function App() {
     );
   }
 
-  // 🔥 FIX: Chat Screen mit Member Liste UND fixed textbox
-  if (screen === 'chat') return (
-    !currentCircle ? (
-      <div className="min-h-screen pb-20 px-6 py-8" style={{ backgroundColor: colors.background }}>
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="text-2xl font-bold" style={{ color: colors.deepBlue }}>Circle</h1>
-          <button onClick={() => { setBottomNav('home'); setScreen('home'); }} className="px-4 py-2 rounded-full" style={{ backgroundColor: colors.white, color: colors.primary }}>
-            Home
-          </button>
+  if (screen === 'chat') {
+    if (!currentCircle) {
+      return (
+        <div className="min-h-screen pb-20 px-6 py-8" style={{ backgroundColor: colors.background }}>
+          <div className="flex items-center justify-between mb-2">
+            <h1 className="text-2xl font-bold" style={{ color: colors.deepBlue }}>Circle</h1>
+            <button onClick={() => { setBottomNav('home'); setScreen('home'); }} className="px-4 py-2 rounded-full" style={{ backgroundColor: colors.white, color: colors.primary }}>
+              Home
+            </button>
+          </div>
+          <p className="text-gray-600 mb-6">Loading your Circle...</p>
+
+          <div className="p-6 rounded-3xl text-center" style={{ backgroundColor: colors.white }}>
+            <div className="text-5xl mb-3">⏳</div>
+            <p className="text-gray-600 mb-4">No circle data available yet.</p>
+            <button
+              onClick={() => { setBottomNav('home'); setScreen('home'); }}
+              className="px-6 py-3 rounded-full"
+              style={{ backgroundColor: colors.primary, color: colors.white }}
+            >
+              Back to Home
+            </button>
+          </div>
+
+          <BottomNavigation />
         </div>
-        <p className="text-gray-600 mb-6">Wir laden deinen Cirqle…</p>
+      );
+    }
 
-        <div className="p-6 rounded-3xl text-center" style={{ backgroundColor: colors.white }}>
-          <div className="text-5xl mb-3">⏳</div>
-          <p className="text-gray-600 mb-4">Noch keine Circle-Daten verfügbar.</p>
-          <button
-            onClick={() => { setBottomNav('home'); setScreen('home'); }}
-            className="px-6 py-3 rounded-full"
-            style={{ backgroundColor: colors.primary, color: colors.white }}
-          >
-            Zurück
-          </button>
+    return (
+      <div className="h-screen flex flex-col" style={{ backgroundColor: colors.background }}>
+        <div className="px-6 py-4 shadow-sm" style={{ backgroundColor: colors.white }}>
+          <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
+          <p className="text-sm text-gray-600">{(currentCircle?.members || []).length} members</p>
         </div>
 
-        <BottomNavigation />
-      </div>
-    ) : (
-    <div className="h-screen flex flex-col" style={{ backgroundColor: colors.background }}>
-      <div className="px-6 py-4 shadow-sm" style={{ backgroundColor: colors.white }}>
-        <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
-        <p className="text-sm text-gray-600">{(currentCircle?.members || []).length} members</p>
-      </div>
-
-      {/* Scrollable content area - WICHTIG: pb-24 damit Platz für input bleibt */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 pb-24">
-        {/* Members List */}
-        <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.white }}>
-          <h4 className="font-semibold mb-4 flex items-center gap-2" style={{ color: colors.deepBlue }}>
-            <Users size={20} color={colors.primary} />
-            Circle Members
-          </h4>
-          <div className="space-y-3">
-            {(currentCircle?.members || []).map((member, idx) => (
-              <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl" style={{ backgroundColor: colors.background }}>
-                <div className="w-12 h-12 rounded-full flex items-center justify-center border-2" 
-                  style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
-                  {member.photo && member.photo.startsWith('http') ? (
-                    <img src={member.photo} alt={member.name} className="w-full h-full rounded-full object-cover" />
-                  ) : (
-                    <span className="text-2xl">{member.photo || '👤'}</span>
+        <div className="flex-1 overflow-y-auto px-6 py-4 pb-24">
+          <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.white }}>
+            <h4 className="font-semibold mb-4 flex items-center gap-2" style={{ color: colors.deepBlue }}>
+              <Users size={20} color={colors.primary} />
+              Circle Members
+            </h4>
+            <div className="space-y-3">
+              {(currentCircle?.members || []).map((member, idx) => (
+                <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl" style={{ backgroundColor: colors.background }}>
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center border-2" 
+                    style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
+                    {member.photo && member.photo.startsWith('http') ? (
+                      <img src={member.photo} alt={member.name} className="w-full h-full rounded-full object-cover" />
+                    ) : (
+                      <span className="text-2xl">{member.photo || '👤'}</span>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold" style={{ color: colors.deepBlue }}>{member.name || 'Member'}</p>
+                    <p className="text-xs text-gray-600">{member.age} years • {currentCircle?.city || ''}</p>
+                  </div>
+                  {member.id === currentUser?.id && (
+                    <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>You</span>
                   )}
                 </div>
-                <div className="flex-1">
-                  <p className="font-bold" style={{ color: colors.deepBlue }}>{member.name || 'Member'}</p>
-                  <p className="text-xs text-gray-600">{member.age} years • {currentCircle?.city || ''}</p>
-                </div>
-                {member.id === currentUser?.id && (
-                  <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>You</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {winningActivity && selectedDate && (
-          <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.primary }}>
-            <div className="flex items-center gap-3 mb-3">
-              <Trophy size={24} color={colors.white} />
-              <p className="font-semibold text-white">Upcoming Event</p>
-            </div>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-4xl">{winningActivity.emoji}</span>
-              <div className="flex-1">
-                <h4 className="text-lg font-bold text-white">{winningActivity.title}</h4>
-                <p className="text-sm text-white opacity-90">{winningActivity.location}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 text-white">
-              <Calendar size={16} />
-              <span className="text-sm">{selectedDate.display} at {winningActivity.time}</span>
-            </div>
-          </div>
-        )}
-
-        {showDatePoll && (
-          <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.white }}>
-            <h4 className="font-semibold mb-3" style={{ color: colors.deepBlue }}>📅 Pick a Date</h4>
-            <p className="text-sm text-gray-600 mb-4">Vote for the best day</p>
-            <div className="space-y-3">
-              {dateOptions.map(date => (
-                <button
-                  key={date.id}
-                  onClick={() => voteForDate(date.id)}
-                  className="w-full p-4 rounded-2xl flex items-center justify-between"
-                  style={{ backgroundColor: colors.background, border: `2px solid ${colors.primary}` }}
-                >
-                  <div className="flex items-center gap-3">
-                    <Calendar size={20} color={colors.primary} />
-                    <span className="font-medium" style={{ color: colors.deepBlue }}>{date.display}</span>
-                  </div>
-                </button>
               ))}
             </div>
           </div>
-        )}
 
-        {messages.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <MessageCircle size={48} className="mx-auto mb-3 opacity-50" />
-            <p>Say hello to your new Cirqle!</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {messages.map(msg => {
-              const isOwnMessage = msg.userId === currentUser?.id;
-              const hasImage = msg.image_url && typeof msg.image_url === 'string' && (msg.image_url.startsWith('http') || msg.image_url.startsWith('https'));
-              return (
-                <div key={msg.id} className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
-                  <span className="text-xs text-gray-500 mb-1">{msg.user}</span>
-                  <div 
-                    className="p-3 rounded-3xl max-w-xs overflow-hidden" 
-                    style={{ 
-                      backgroundColor: isOwnMessage ? colors.primary : colors.white,
-                      color: isOwnMessage ? colors.white : colors.deepBlue
-                    }}
-                  >
-                    {hasImage ? (
-                      <img src={msg.image_url} alt="Chat" className="rounded-2xl max-w-full max-h-64 object-cover block" />
-                    ) : null}
-                    {msg.text ? <p className={hasImage ? 'mt-2' : ''}>{msg.text}</p> : null}
-                    <span className={`text-xs mt-1 block ${isOwnMessage ? 'text-white opacity-75' : 'text-gray-400'}`}>
-                      {msg.timestamp}
-                    </span>
-                  </div>
+          {winningActivity && selectedDate && (
+            <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.primary }}>
+              <div className="flex items-center gap-3 mb-3">
+                <Trophy size={24} color={colors.white} />
+                <p className="font-semibold text-white">Upcoming Event</p>
+              </div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-4xl">{winningActivity.emoji}</span>
+                <div className="flex-1">
+                  <h4 className="text-lg font-bold text-white">{winningActivity.title}</h4>
+                  <p className="text-sm text-white opacity-90">{winningActivity.location}</p>
                 </div>
-              );
-            })}
-            <div ref={chatEndRef} />
-          </div>
-        )}
-      </div>
+              </div>
+              <div className="flex items-center gap-2 text-white">
+                <Calendar size={16} />
+                <span className="text-sm">{selectedDate.display} at {winningActivity.time}</span>
+              </div>
+            </div>
+          )}
 
-      {/* Chat-Eingabe: Text + Bild */}
-      <div className="fixed bottom-16 left-0 right-0 p-4" style={{ backgroundColor: colors.white, borderTop: `1px solid ${colors.background}` }}>
-        <div className="flex gap-2 items-center">
-          <input 
-            type="text" 
-            value={messageInput} 
-            onChange={(e) => setMessageInput(e.target.value)} 
-            onKeyPress={(e) => e.key === 'Enter' && sendMessage()} 
-            placeholder="Nachricht..." 
-            className="flex-1 px-4 py-3 rounded-full border-2" 
-            style={{ borderColor: colors.primary + '50' }} 
-          />
-          <input
-            ref={chatImageInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleChatImageUpload}
-          />
-          <button
-            type="button"
-            onClick={() => chatImageInputRef.current?.click()}
-            className="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center"
-            style={{ backgroundColor: colors.background, color: colors.primary }}
-            title="Bild senden"
-          >
-            <ImageIcon size={22} />
-          </button>
-          <button 
-            onClick={() => sendMessage()} 
-            className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" 
-            style={{ backgroundColor: colors.primary }}
-          >
-            <Send size={20} color={colors.white} />
-          </button>
+          {showDatePoll && (
+            <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.white }}>
+              <h4 className="font-semibold mb-3" style={{ color: colors.deepBlue }}>📅 Pick a Date</h4>
+              <p className="text-sm text-gray-600 mb-4">Vote for the best day</p>
+              <div className="space-y-3">
+                {dateOptions.map(date => (
+                  <button
+                    key={date.id}
+                    onClick={() => voteForDate(date.id)}
+                    className="w-full p-4 rounded-2xl flex items-center justify-between"
+                    style={{ backgroundColor: colors.background, border: `2px solid ${colors.primary}` }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Calendar size={20} color={colors.primary} />
+                      <span className="font-medium" style={{ color: colors.deepBlue }}>{date.display}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <MessageCircle size={48} className="mx-auto mb-3 opacity-50" />
+              <p>Say hello to your new Cirqle!</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {messages.map(msg => {
+                const isOwnMessage = msg.userId === currentUser?.id;
+                const hasImage = msg.image_url && typeof msg.image_url === 'string' && (msg.image_url.startsWith('http') || msg.image_url.startsWith('https'));
+                return (
+                  <div key={msg.id} className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+                    <span className="text-xs text-gray-500 mb-1">{msg.user}</span>
+                    <div 
+                      className="p-3 rounded-3xl max-w-xs overflow-hidden" 
+                      style={{ 
+                        backgroundColor: isOwnMessage ? colors.primary : colors.white,
+                        color: isOwnMessage ? colors.white : colors.deepBlue
+                      }}
+                    >
+                      {hasImage ? (
+                        <img src={msg.image_url} alt="Chat" className="rounded-2xl max-w-full max-h-64 object-cover block" />
+                      ) : null}
+                      {msg.text ? <p className={hasImage ? 'mt-2' : ''}>{msg.text}</p> : null}
+                      <span className={`text-xs mt-1 block ${isOwnMessage ? 'text-white opacity-75' : 'text-gray-400'}`}>
+                        {msg.timestamp}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={chatEndRef} />
+            </div>
+          )}
         </div>
+
+        <div className="fixed bottom-16 left-0 right-0 p-4" style={{ backgroundColor: colors.white, borderTop: `1px solid ${colors.background}` }}>
+          <div className="flex gap-2 items-center">
+            <input 
+              type="text" 
+              value={messageInput} 
+              onChange={(e) => setMessageInput(e.target.value)} 
+              onKeyPress={(e) => e.key === 'Enter' && sendMessage()} 
+              placeholder="Message..." 
+              className="flex-1 px-4 py-3 rounded-full border-2" 
+              style={{ borderColor: colors.primary + '50' }} 
+            />
+            <input
+              ref={chatImageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleChatImageUpload}
+            />
+            <button
+              type="button"
+              onClick={() => chatImageInputRef.current?.click()}
+              className="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: colors.background, color: colors.primary }}
+              title="Send image"
+            >
+              <ImageIcon size={22} />
+            </button>
+            <button 
+              onClick={() => sendMessage()} 
+              className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" 
+              style={{ backgroundColor: colors.primary }}
+            >
+              <Send size={20} color={colors.white} />
+            </button>
+          </div>
+        </div>
+        
+        <BottomNavigation />
       </div>
-      
-      <BottomNavigation />
-    </div>
-    )
-  );
+    );
+  }
 
   if (screen === 'home') return (
     <div className="min-h-screen pb-20 px-6 py-8" style={{ backgroundColor: colors.background }}>
@@ -1661,3 +1628,4 @@ function App() {
 }
 
 export default App;
+
