@@ -586,14 +586,15 @@ function App() {
       }
 
       const activities = [];
-      const topInt = matchedCircle?.top_interests || userData.interests.slice(0, 3);
-      topInt.forEach(interest => {
+      const topInt = matchedCircle?.top_interests || userData.interests.slice(0, 3) || [];
+      (Array.isArray(topInt) ? topInt : []).forEach(interest => {
         if (ACTIVITY_DATABASE[interest]) {
           activities.push(...ACTIVITY_DATABASE[interest]);
         }
       });
-
-      setVotingActivities(activities.slice(0, 8));
+      const fallbackActivities = Object.values(ACTIVITY_DATABASE).flat().slice(0, 8);
+      const toVote = activities.length > 0 ? activities.slice(0, 8) : fallbackActivities;
+      setVotingActivities(toVote);
 
       setShowMatchingNotification(true);
       setTimeout(() => {
@@ -722,6 +723,17 @@ function App() {
     setShowMatchAnimation(false);
     setShowDatePoll(true);
     setScreen('chat');
+  };
+
+  const skipCalculatingAndShowMatch = () => {
+    if (!winningActivity && votingActivities.length > 0) {
+      setWinningActivity({ ...votingActivities[0], score: '4.0' });
+    } else if (!winningActivity) {
+      const fallback = Object.values(ACTIVITY_DATABASE).flat()[0] || { id: 'fx1', title: 'Coffee Tasting', description: 'Try different varieties', price: '€12/person', emoji: '☕', location: 'Café Bellecour', time: '15:00' };
+      setWinningActivity({ ...fallback, score: '4.0' });
+    }
+    setShowWinnerModal(false);
+    setTimeout(() => startDatePoll(), 50);
   };
 
   const voteForDate = async (dateId) => {
@@ -918,9 +930,9 @@ function App() {
             <Check size={40} color={colors.primary} />
           </div>
           <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>You're in! 🎉</h3>
-          <p className="text-gray-600 mb-4">Matched with {currentCircle?.members.length} people</p>
+          <p className="text-gray-600 mb-4">Matched with {(currentCircle?.members || []).length} people</p>
           <div className="flex justify-center gap-2 flex-wrap mb-4">
-            {currentCircle?.members.slice(0, 2).map((m, i) => (
+            {(currentCircle?.members || []).slice(0, 2).map((m, i) => (
               <div key={i} className="text-3xl">{m.photo && m.photo.startsWith('http') ? '👤' : m.photo || '👤'}</div>
             ))}
           </div>
@@ -931,7 +943,7 @@ function App() {
 
   const MatchAnimationModal = () => {
     if (!showMatchAnimation || !currentCircle) return null;
-    const otherMembers = currentCircle.members.filter(m => m.id !== currentUser?.id);
+    const otherMembers = (currentCircle.members || []).filter(m => m.id !== currentUser?.id);
     const myInterests = (currentUser?.interests || userData.interests || []);
     const total = Math.max(1, otherMembers.length);
     const index = Math.min(matchRevealCardIndex, total - 1);
@@ -1299,11 +1311,19 @@ function App() {
     if (currentVotingIndex >= votingActivities.length) {
       return (
         <>
-          <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: colors.background }}>
-            <div className="text-center">
+          <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: colors.background }}>
+            <div className="text-center mb-6">
               <div className="text-6xl mb-4">⏳</div>
               <p className="text-xl font-semibold" style={{ color: colors.deepBlue }}>Calculating results...</p>
             </div>
+            <button
+              type="button"
+              onClick={skipCalculatingAndShowMatch}
+              className="px-6 py-3 rounded-full text-sm font-medium"
+              style={{ backgroundColor: colors.primary + '25', color: colors.primary }}
+            >
+              Weiter – falls nichts passiert
+            </button>
           </div>
           <WinnerModal />
         </>
@@ -1335,7 +1355,7 @@ function App() {
                 <p className="text-gray-600 mb-4">{activity.description}</p>
                 <div className="flex items-center justify-between">
                   <span className="text-lg font-semibold" style={{ color: colors.primary }}>{activity.price}</span>
-                  <span className="text-sm text-gray-500">For your group of {currentCircle?.members.length || 2}</span>
+                  <span className="text-sm text-gray-500">For your group of {(currentCircle?.members || []).length || 2}</span>
                 </div>
               </div>
             </div>
@@ -1372,7 +1392,7 @@ function App() {
     <div className="h-screen flex flex-col" style={{ backgroundColor: colors.background }}>
       <div className="px-6 py-4 shadow-sm" style={{ backgroundColor: colors.white }}>
         <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
-        <p className="text-sm text-gray-600">{currentCircle?.members.length || 0} members</p>
+        <p className="text-sm text-gray-600">{(currentCircle?.members || []).length} members</p>
       </div>
 
       {/* Scrollable content area - WICHTIG: pb-24 damit Platz für input bleibt */}
@@ -1384,7 +1404,7 @@ function App() {
             Circle Members
           </h4>
           <div className="space-y-3">
-            {currentCircle?.members.map((member, idx) => (
+            {(currentCircle?.members || []).map((member, idx) => (
               <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl" style={{ backgroundColor: colors.background }}>
                 <div className="w-12 h-12 rounded-full flex items-center justify-center border-2" 
                   style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
@@ -1541,7 +1561,7 @@ function App() {
           <div className="flex items-start justify-between mb-3">
             <h3 className="text-xl font-semibold" style={{ color: colors.deepBlue }}>Your Active Cirqle</h3>
             <span className="text-sm font-medium px-3 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>
-              {currentCircle.members.length}/2
+              {(currentCircle.members || []).length}/2
             </span>
           </div>
           <p className="text-sm text-gray-600 mb-3">{currentCircle.city}</p>
@@ -1615,3 +1635,4 @@ function App() {
 }
 
 export default App;
+
