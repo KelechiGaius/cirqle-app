@@ -113,11 +113,6 @@ function App() {
   
   const [showMatchAnimation, setShowMatchAnimation] = useState(false);
   
-  // ✨ NEU: Match Reveal States
-  const [showMatchReveal, setShowMatchReveal] = useState(false);
-  const [matchedMembers, setMatchedMembers] = useState([]);
-  const [revealCardIndex, setRevealCardIndex] = useState(0);
-  
   const chatEndRef = useRef(null);
   const messagesSubscription = useRef(null);
   const fileInputRef = useRef(null);
@@ -261,14 +256,8 @@ function App() {
     }
   };
 
-  // 🔥 VERBESSERT: Real-time Chat mit Duplikat-Prävention
   useEffect(() => {
-    if (!currentCircle) {
-      console.log('No circle, skipping messages subscription');
-      return;
-    }
-
-    console.log('🔥 Setting up real-time messages for circle:', currentCircle.id);
+    if (!currentCircle?.id) return;
     
     loadMessages();
 
@@ -282,142 +271,124 @@ function App() {
           filter: `circle_id=eq.${currentCircle.id}` 
         },
         (payload) => {
-          console.log('✅ New message received:', payload.new);
           const newMessage = payload.new;
-          
-          // WICHTIG: Verhindert Duplikate
           setMessages(prev => {
-            const exists = prev.find(m => m.id === newMessage.id);
-            if (exists) {
-              console.log('Message already exists, skipping');
-              return prev;
-            }
-            
+            // Prevent duplicates
+            if (prev.some(m => m.id === newMessage.id)) return prev;
             return [...prev, {
               id: newMessage.id,
               user: newMessage.sender_name || 'Unknown',
               text: newMessage.text,
               userId: newMessage.user_id,
-              timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-              })
+              timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }];
           });
         }
       )
-      .subscribe((status) => {
-        console.log('Real-time subscription status:', status);
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Successfully subscribed to messages');
-        }
-      });
-
-    messagesSubscription.current = channel;
+      .subscribe();
 
     return () => {
-      console.log('Cleaning up messages subscription');
-      if (messagesSubscription.current) {
-        supabase.removeChannel(messagesSubscription.current);
-      }
+      supabase.removeChannel(channel);
     };
-  }, [currentCircle?.id]); // NUR wenn circle ID sich ändert
+  }, [currentCircle?.id]);
 
   const loadMessages = async () => {
     if (!currentCircle) return;
+
+    console.log('📨 Loading messages for circle:', currentCircle.id);
     
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('circle_id', currentCircle.id)
-        .order('created_at', { ascending: true });
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('circle_id', currentCircle.id)
+      .order('created_at', { ascending: true });
 
-      if (error) throw error;
+    if (error) {
+      console.error('❌ Error loading messages:', error);
+      return;
+    }
 
-      setMessages(data.map(msg => ({
-        id: msg.id,
-        user: msg.sender_name,
-        text: msg.text,
-        userId: msg.user_id,
-        timestamp: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    if (data) {
+      console.log('✅ Messages loaded:', data.length);
+      setMessages(data.map(m => ({
+        id: m.id,
+        user: m.sender_name || 'Unknown',
+        text: m.text,
+        userId: m.user_id,
+        timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       })));
-    } catch (error) {
-      console.error('Error loading messages:', error);
     }
   };
 
-  const sendMessage = async () => {
-    if (!messageInput.trim() || !currentCircle || !currentUser) return;
-
+  const handleSignUp = async () => {
     try {
-      const { error } = await supabase
-        .from('messages')
-        .insert([{
-          circle_id: currentCircle.id,
-          user_id: currentUser.id,
-          sender_name: currentUser.name,
-          text: messageInput
-        }]);
+      setAuthError('');
+      setLoading(true);
 
-      if (error) throw error;
-
-      setMessageInput('');
-    } catch (error) {
-      console.error('Error sending message:', error);
-    }
-  };
-
-  const handleSignUp = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-
-    try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: authData.email,
-        password: authData.password
+        password: authData.password,
       });
 
       if (error) throw error;
 
-      alert('Check your email for verification!');
+      setAuthData({ email: '', password: '' });
+      setOnboardingStep(0); // Reset onboarding
+      setScreen('onboarding');
+      setLoading(false);
+      console.log('✅ Registered successfully, redirecting to onboarding');
     } catch (error) {
       setAuthError(error.message);
+      console.error('❌ Registration error:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSignIn = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-
+  const handleSignIn = async () => {
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      setAuthError('');
+      setLoading(true);
+
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: authData.email,
-        password: authData.password
+        password: authData.password,
       });
 
       if (error) throw error;
+      setAuthData({ email: '', password: '' });
+      console.log('✅ Login successful');
     } catch (error) {
       setAuthError(error.message);
+      console.error('❌ Login error:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
+    setSession(null);
     setCurrentUser(null);
     setCurrentCircle(null);
-    setScreen('auth');
+    setUserData({ name: '', age: '', photo: null, city: '', interests: [] });
+    setScreen('welcome');
   };
 
-  const completeOnboarding = async () => {
-    if (!userData.name || !userData.age || !userData.city || userData.interests.length < 3) {
-      alert('Please complete all fields and select at least 3 interests');
+  const calculateInterestOverlap = (interests1, interests2) => {
+    const common = interests1.filter(i => interests2.includes(i));
+    return common.length;
+  };
+
+  const findAndCreateCircle = async () => {
+    if (!session) {
+      console.error('❌ No session found!');
+      alert('Please login first. Session expired.');
+      setScreen('auth');
       return;
     }
 
-    console.log('🚀 Starting completeOnboarding...');
-
-    if (!session || !session.user || !session.user.id) {
+    if (!session.user || !session.user.id) {
       console.error('❌ Invalid session!');
       alert('Invalid session. Please login again.');
       setScreen('auth');
@@ -580,11 +551,6 @@ function App() {
       setLoading(false);
     }
   };
-
-  const calculateInterestOverlap = (interests1, interests2) => {
-    return interests1.filter(i => interests2.includes(i)).length;
-  };
-
   const voteForActivity = (activityId, rating) => {
     console.log(`🗳️ Voted for ${activityId} with ${rating} stars`);
     const newVotes = { ...userVotes, [activityId]: rating };
@@ -596,13 +562,25 @@ function App() {
     } else {
       console.log('🏁 LAST VOTE! Calling finishVoting...');
       finishVoting(newVotes);
+      
+      setTimeout(() => {
+        if (!showWinnerModal) {
+          console.error('⚠️ EMERGENCY: Winner modal did not appear! Forcing it now...');
+          if (votingActivities.length > 0) {
+            const emergencyWinner = votingActivities[Math.floor(Math.random() * votingActivities.length)];
+            setWinningActivity({ ...emergencyWinner, score: '4.0' });
+            setShowWinnerModal(true);
+          }
+        }
+      }, 5000);
     }
   };
 
-  // 🔥 VERBESSERT: Voting Flow ohne setTimeout
   const finishVoting = async (finalUserVotes) => {
     try {
       console.log('🔥 Starting finishVoting...');
+      
+      setCurrentVotingIndex(votingActivities.length);
       
       const allVotes = {};
       
@@ -635,14 +613,14 @@ function App() {
       }
 
       const winnerWithScore = { ...winner, score: highestScore.toFixed(1) };
-      
-      // KRITISCH: Setze state SYNCHRON, kein setTimeout!
       setWinningActivity(winnerWithScore);
-      setShowWinnerModal(true);
+      console.log('✅ Winner set:', winnerWithScore.title);
       
-      console.log('✅ Winner modal should now be visible:', winnerWithScore.title);
+      setTimeout(() => {
+        console.log('🏆 Showing winner modal...');
+        setShowWinnerModal(true);
+      }, 1000);
 
-      // Speichere in Datenbank im Hintergrund
       if (currentCircle && currentUser) {
         try {
           const votesToSave = Object.entries(finalUserVotes).map(([activityId, rating]) => ({
@@ -653,7 +631,14 @@ function App() {
           }));
 
           await supabase.from('votes').insert(votesToSave);
-          
+          console.log('✅ Votes saved');
+        } catch (err) {
+          console.warn('⚠️ Votes save failed:', err);
+        }
+      }
+      
+      if (currentCircle && winner) {
+        try {
           await supabase
             .from('circles')
             .update({ 
@@ -661,40 +646,38 @@ function App() {
               winning_activity_data: winner 
             })
             .eq('id', currentCircle.id);
-            
-          console.log('✅ Votes and winner saved to database');
+          console.log('✅ Winner saved');
         } catch (err) {
-          console.warn('⚠️ Database save failed (non-critical):', err);
+          console.warn('⚠️ Winner save failed:', err);
         }
       }
       
     } catch (error) {
       console.error('❌ Error in finishVoting:', error);
       if (votingActivities.length > 0) {
-        setWinningActivity({ ...votingActivities[0], score: '4.0' });
-        setShowWinnerModal(true);
+        const fallbackWinner = votingActivities[0];
+        setWinningActivity({ ...fallbackWinner, score: '4.0' });
+        setTimeout(() => setShowWinnerModal(true), 1000);
       }
     }
   };
 
-  // 🔥 VERBESSERT: Start Date Poll mit Match Reveal
   const startDatePoll = () => {
     console.log('Starting date poll...');
     const dates = generateDateOptions();
     setDateOptions(dates);
     setShowWinnerModal(false);
     
-    // Zeige Match Reveal Modal
-    if (currentCircle && currentCircle.members) {
-      const otherMembers = currentCircle.members.filter(m => m.id !== currentUser?.id);
-      setMatchedMembers(otherMembers);
-      setRevealCardIndex(0);
-      setShowMatchReveal(true);
-    } else {
-      // Fallback falls keine Members
+    // Show match animation immediately
+    setShowMatchAnimation(true);
+    console.log('✅ Showing match animation');
+    
+    setTimeout(() => {
+      setShowMatchAnimation(false);
       setShowDatePoll(true);
       setScreen('chat');
-    }
+      console.log('✅ Navigated to chat with date poll');
+    }, 3000);
   };
 
   const voteForDate = async (dateId) => {
@@ -707,938 +690,526 @@ function App() {
           allVotes[opt.id] = Math.floor(Math.random() * 3);
         }
       });
-
-      let highestVote = 0;
-      let winningDateId = null;
-
-      Object.entries(allVotes).forEach(([id, vote]) => {
-        if (vote > highestVote) {
-          highestVote = vote;
-          winningDateId = id;
-        }
-      });
-
-      const finalDate = dateOptions.find(d => d.id === winningDateId);
-      setSelectedDate(finalDate);
+      
+      setDateVotes(allVotes);
+      
+      const winnerDate = dateOptions.find(d => d.id === dateId);
+      setSelectedDate(winnerDate);
       setShowDatePoll(false);
-      
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
       setShowEventConfirmation(true);
-      console.log('✅ Event confirmation shown');
 
+      if (currentCircle && winningActivity) {
+        await supabase
+          .from('circles')
+          .update({ 
+            event_date: winnerDate.date.toISOString(),
+            event_confirmed: true
+          })
+          .eq('id', currentCircle.id);
+        console.log('✅ Event saved');
+      }
+      
+      setTimeout(() => {
+        setShowEventConfirmation(false);
+        setScreen('chat');
+        console.log('✅ Redirected to chat');
+      }, 3000);
     } catch (error) {
-      console.error('❌ Error in voteForDate:', error);
+      console.error('❌ Error voting for date:', error);
     }
+  };
+
+  const handleOnboardingNext = () => {
+    if (onboardingStep === 0 && !userData.name) {
+      alert('Please enter your name');
+      return;
+    }
+    if (onboardingStep === 1 && !userData.age) {
+      alert('Please enter your age');
+      return;
+    }
+    if (onboardingStep === 2 && !userData.photo) {
+      alert('Please add a photo');
+      return;
+    }
+    if (onboardingStep === 3 && !userData.city) {
+      alert('Please enter your city');
+      return;
+    }
+    
+    if (onboardingStep < 3) {
+      setOnboardingStep(onboardingStep + 1);
+    } else {
+      setScreen('interests');
+    }
+  };
+
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setUserData({ ...userData, photo: reader.result });
+    };
+    reader.readAsDataURL(file);
   };
 
   const toggleInterest = (interest) => {
-    setUserData(prev => ({
-      ...prev,
-      interests: prev.interests.includes(interest)
-        ? prev.interests.filter(i => i !== interest)
-        : [...prev.interests, interest]
-    }));
-  };
-
-  const handlePhotoUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random()}.${fileExt}`;
-      const filePath = `${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file);
-
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
-
-      setUserData(prev => ({ ...prev, photo: data.publicUrl }));
-    } catch (error) {
-      console.error('Error uploading photo:', error);
-      alert('Error uploading photo');
+    const current = userData.interests;
+    if (current.includes(interest)) {
+      setUserData({ ...userData, interests: current.filter(i => i !== interest) });
+    } else {
+      setUserData({ ...userData, interests: [...current, interest] });
     }
   };
 
-  // ✨ NEU: Match Reveal Modal Component
-  const MatchRevealModal = () => {
-    if (!showMatchReveal || !matchedMembers.length) return null;
+  const sendMessage = async () => {
+    if (!messageInput.trim()) {
+      console.log('❌ Empty message');
+      return;
+    }
     
-    return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10000,
-        padding: '20px'
-      }}>
-        <div style={{
-          textAlign: 'center',
-          color: colors.white,
-          marginBottom: '40px'
-        }}>
-          <h1 style={{ 
-            fontSize: '32px', 
-            marginBottom: '10px',
-            animation: 'fadeIn 0.5s ease-out'
-          }}>
-            You're in! 🎉
-          </h1>
-          <p style={{ fontSize: '18px', color: '#B0D4FF' }}>
-            Matched with {matchedMembers.length} {matchedMembers.length === 1 ? 'person' : 'people'} who share your interests
-          </p>
-        </div>
-        
-        <div style={{
-          width: '100%',
-          maxWidth: '400px',
-          height: '500px',
-          position: 'relative'
-        }}>
-          {matchedMembers.map((member, index) => (
-            <div
-              key={member.id}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                backgroundColor: colors.white,
-                borderRadius: '24px',
-                padding: '30px',
-                textAlign: 'center',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-                transform: index === revealCardIndex ? 'scale(1)' : 'scale(0.95)',
-                opacity: index === revealCardIndex ? 1 : 0,
-                transition: 'all 0.3s ease-out',
-                pointerEvents: index === revealCardIndex ? 'auto' : 'none'
-              }}
-            >
-              <div style={{
-                width: '120px',
-                height: '120px',
-                margin: '0 auto 20px',
-                borderRadius: '50%',
-                border: `4px solid ${colors.primary}`,
-                overflow: 'hidden',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '60px',
-                backgroundColor: colors.background
-              }}>
-                {member.photo || '👤'}
-              </div>
-              
-              <h2 style={{ 
-                fontSize: '28px', 
-                fontWeight: 'bold',
-                marginBottom: '5px',
-                color: colors.deepBlue
-              }}>
-                {member.name}
-              </h2>
-              <p style={{ 
-                fontSize: '18px', 
-                color: '#666',
-                marginBottom: '25px'
-              }}>
-                {member.age} years old
-              </p>
-              
-              <div style={{ marginBottom: '30px' }}>
-                <p style={{ 
-                  fontSize: '14px', 
-                  color: '#888',
-                  marginBottom: '10px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px'
-                }}>
-                  Shared Interests
-                </p>
-                <div style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: '8px',
-                  justifyContent: 'center'
-                }}>
-                  {(member.interests || []).slice(0, 3).map(interest => (
-                    <span key={interest} style={{
-                      backgroundColor: colors.lightBlue,
-                      color: colors.white,
-                      padding: '6px 16px',
-                      borderRadius: '20px',
-                      fontSize: '14px',
-                      fontWeight: '500'
-                    }}>
-                      {interest}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              
-              <div style={{
-                display: 'flex',
-                justifyContent: 'center',
-                gap: '10px',
-                marginTop: '30px'
-              }}>
-                {matchedMembers.map((_, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      backgroundColor: i === revealCardIndex ? colors.primary : '#ddd',
-                      transition: 'all 0.3s ease'
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-        
-        <div style={{
-          marginTop: '30px',
-          display: 'flex',
-          gap: '15px'
-        }}>
-          {revealCardIndex > 0 && (
-            <button
-              onClick={() => setRevealCardIndex(revealCardIndex - 1)}
-              style={{
-                padding: '12px 24px',
-                borderRadius: '12px',
-                border: `2px solid ${colors.primary}`,
-                backgroundColor: 'transparent',
-                color: colors.white,
-                fontSize: '16px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
-            >
-              ← Previous
-            </button>
-          )}
-          
-          {revealCardIndex < matchedMembers.length - 1 ? (
-            <button
-              onClick={() => setRevealCardIndex(revealCardIndex + 1)}
-              style={{
-                padding: '12px 24px',
-                borderRadius: '12px',
-                border: 'none',
-                backgroundColor: colors.primary,
-                color: colors.white,
-                fontSize: '16px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
-            >
-              Next →
-            </button>
-          ) : (
-            <button
-              onClick={() => {
-                setShowMatchReveal(false);
-                setShowDatePoll(true);
-                setScreen('chat');
-              }}
-              style={{
-                padding: '15px 40px',
-                borderRadius: '12px',
-                border: 'none',
-                backgroundColor: colors.primary,
-                color: colors.white,
-                fontSize: '18px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(91, 155, 213, 0.4)'
-              }}
-            >
-              Continue to Date Selection →
-            </button>
-          )}
-        </div>
-      </div>
-    );
+    if (!currentCircle) {
+      console.log('❌ No circle');
+      alert('Not in a circle');
+      return;
+    }
+    
+    if (!currentUser) {
+      console.log('❌ No user');
+      alert('Not logged in');
+      return;
+    }
+
+    console.log('📤 Sending message:', messageInput);
+
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .insert([{
+          circle_id: currentCircle.id,
+          user_id: currentUser.id,
+          sender_name: currentUser.name,
+          text: messageInput
+        }])
+        .select();
+
+      if (error) throw error;
+      
+      console.log('✅ Message sent successfully:', data);
+      setMessageInput('');
+    } catch (error) {
+      console.error('❌ Error sending message:', error);
+      alert('Error sending message: ' + error.message);
+    }
   };
+
+  const CircleLogo = ({ size = 80, color = colors.primary }) => (
+    <svg width={size} height={size} viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="35" fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" strokeDasharray="200, 30" transform="rotate(-10 50 50)" />
+    </svg>
+  );
+
+  const BottomNavigation = () => (
+    <div className="fixed bottom-0 left-0 right-0 px-6 py-4 shadow-lg flex justify-around items-center" style={{ backgroundColor: colors.white, borderTop: `1px solid ${colors.background}` }}>
+      <button onClick={() => { setBottomNav('home'); setScreen('home'); }} className="flex flex-col items-center gap-1" style={{ color: bottomNav === 'home' ? colors.primary : '#9CA3AF' }}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+        <span className="text-xs font-medium">Home</span>
+      </button>
+      
+      <button onClick={() => { setBottomNav('circle'); currentCircle && setScreen('chat'); }} className="flex flex-col items-center gap-1" style={{ color: bottomNav === 'circle' ? colors.primary : '#9CA3AF' }}>
+        <CircleLogo size={28} color={bottomNav === 'circle' ? colors.primary : '#9CA3AF'} />
+        <span className="text-xs font-medium">Circle</span>
+      </button>
+      
+      <button onClick={() => { setBottomNav('profile'); setScreen('profile'); }} className="flex flex-col items-center gap-1" style={{ color: bottomNav === 'profile' ? colors.primary : '#9CA3AF' }}>
+        <User size={24} />
+        <span className="text-xs font-medium">Profile</span>
+      </button>
+    </div>
+  );
 
   const MatchingNotification = () => {
     if (!showMatchingNotification) return null;
+    
     return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.9)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10000
-      }}>
-        <div style={{ textAlign: 'center', color: colors.white }}>
-          <h1 style={{ fontSize: '48px', marginBottom: '20px' }}>🎉</h1>
-          <h2 style={{ fontSize: '32px', marginBottom: '10px' }}>Finding your Cirqle...</h2>
-          <p style={{ fontSize: '18px', color: '#B0D4FF' }}>Matching based on your interests</p>
-        </div>
-      </div>
-    );
-  };
-
-  const WinnerModal = () => {
-    if (!showWinnerModal || !winningActivity) return null;
-    return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10000,
-        padding: '20px'
-      }}>
-        <div style={{
-          backgroundColor: colors.white,
-          borderRadius: '24px',
-          padding: '40px',
-          maxWidth: '500px',
-          width: '100%',
-          textAlign: 'center'
-        }}>
-          <Trophy size={64} color={colors.primary} style={{ margin: '0 auto 20px' }} />
-          <h2 style={{ fontSize: '28px', marginBottom: '10px', color: colors.deepBlue }}>
-            Winner!
-          </h2>
-          <div style={{ fontSize: '64px', marginBottom: '20px' }}>
-            {winningActivity.emoji}
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center">
+          <div className="w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4" style={{ backgroundColor: colors.primary + '20' }}>
+            <Check size={40} color={colors.primary} />
           </div>
-          <h3 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px', color: colors.deepBlue }}>
-            {winningActivity.title}
-          </h3>
-          <p style={{ fontSize: '16px', color: '#666', marginBottom: '10px' }}>
-            {winningActivity.description}
-          </p>
-          <div style={{ 
-            display: 'inline-flex', 
-            alignItems: 'center', 
-            gap: '5px',
-            backgroundColor: colors.background,
-            padding: '8px 16px',
-            borderRadius: '20px',
-            marginBottom: '20px'
-          }}>
-            <Star size={16} color={colors.primary} fill={colors.primary} />
-            <span style={{ fontWeight: 'bold', color: colors.primary }}>
-              {winningActivity.score}
-            </span>
-            <span style={{ color: '#666' }}>/ 4.0</span>
+          <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>You're in! 🎉</h3>
+          <p className="text-gray-600 mb-4">Matched with {currentCircle?.members.length} people</p>
+          <div className="flex justify-center gap-2 flex-wrap mb-4">
+            {currentCircle?.members.slice(0, 2).map((m, i) => (
+              <div key={i} className="text-3xl">{m.photo}</div>
+            ))}
           </div>
-          <button
-            onClick={startDatePoll}
-            style={{
-              width: '100%',
-              padding: '16px',
-              borderRadius: '12px',
-              border: 'none',
-              backgroundColor: colors.primary,
-              color: colors.white,
-              fontSize: '18px',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              marginTop: '10px'
-            }}
-          >
-            Pick a Date →
-          </button>
         </div>
       </div>
     );
   };
 
   const MatchAnimationModal = () => {
-    if (!showMatchAnimation) return null;
+    if (!showMatchAnimation || !currentCircle) return null;
+    
+    const otherMembers = currentCircle.members.filter(m => m.id !== currentUser?.id);
+    
     return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.9)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10000
-      }}>
-        <div style={{ textAlign: 'center', color: colors.white }}>
-          <h1 style={{ fontSize: '48px', marginBottom: '20px' }}>✨</h1>
-          <h2 style={{ fontSize: '32px', marginBottom: '10px' }}>You matched!</h2>
-          <p style={{ fontSize: '18px', color: '#B0D4FF' }}>Opening chat...</p>
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center animate-bounce-once">
+          <div className="text-6xl mb-4">🎉</div>
+          <h3 className="text-2xl font-bold mb-4" style={{ color: colors.deepBlue }}>You matched with!</h3>
+          
+          <div className="flex justify-center gap-4 mb-6">
+            {otherMembers.map((member, i) => (
+              <div key={i} className="text-center">
+                {member.photo && typeof member.photo === 'string' && member.photo.startsWith('data:') ? (
+                  <img 
+                    src={member.photo} 
+                    alt={member.name}
+                    className="w-24 h-24 rounded-full object-cover mx-auto mb-2 border-4"
+                    style={{ borderColor: colors.primary }}
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded-full flex items-center justify-center text-4xl mx-auto mb-2 border-4" 
+                    style={{ borderColor: colors.primary, backgroundColor: colors.background }}>
+                    {member.photo || '👤'}
+                  </div>
+                )}
+                <p className="font-bold" style={{ color: colors.primary }}>{member.name}</p>
+                <p className="text-sm text-gray-600">{member.age} years</p>
+              </div>
+            ))}
+          </div>
+          
+          <p className="text-gray-600">Let's pick a date for your activity!</p>
+        </div>
+      </div>
+    );
+  };
+
+  const WinnerModal = () => {
+    console.log('WinnerModal render - showWinnerModal:', showWinnerModal, 'winningActivity:', winningActivity);
+    
+    if (!showWinnerModal || !winningActivity) {
+      console.log('WinnerModal not showing');
+      return null;
+    }
+    
+    console.log('✅ WinnerModal IS SHOWING with activity:', winningActivity.title);
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center">
+          <div className="text-6xl mb-4">🏆</div>
+          <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>Winner!</h3>
+          <p className="text-gray-600 mb-6">Your Cirqle has chosen</p>
+          
+          <div className="text-5xl mb-4">{winningActivity.emoji}</div>
+          <h4 className="text-xl font-semibold mb-2" style={{ color: colors.primary }}>{winningActivity.title}</h4>
+          <p className="text-gray-600 mb-4">{winningActivity.description}</p>
+          
+          <button 
+            onClick={() => {
+              console.log('🔥 "Pick a Date" clicked!');
+              startDatePoll();
+            }} 
+            className="w-full py-3 rounded-full font-semibold" 
+            style={{ backgroundColor: colors.primary, color: colors.white }}
+          >
+            Pick a Date
+          </button>
         </div>
       </div>
     );
   };
 
   const EventConfirmationModal = () => {
-    if (!showEventConfirmation || !winningActivity || !selectedDate) return null;
+    if (!showEventConfirmation || !selectedDate || !winningActivity) return null;
+    
     return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10000,
-        padding: '20px'
-      }}>
-        <div style={{
-          backgroundColor: colors.white,
-          borderRadius: '24px',
-          padding: '40px',
-          maxWidth: '500px',
-          width: '100%',
-          textAlign: 'center'
-        }}>
-          <Calendar size={64} color={colors.primary} style={{ margin: '0 auto 20px' }} />
-          <h2 style={{ fontSize: '28px', marginBottom: '20px', color: colors.deepBlue }}>
-            Event Confirmed! 🎉
-          </h2>
-          <div style={{
-            backgroundColor: colors.background,
-            borderRadius: '16px',
-            padding: '20px',
-            marginBottom: '20px',
-            textAlign: 'left'
-          }}>
-            <div style={{ marginBottom: '15px' }}>
-              <span style={{ fontSize: '32px' }}>{winningActivity.emoji}</span>
-            </div>
-            <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '10px', color: colors.deepBlue }}>
-              {winningActivity.title}
-            </h3>
-            <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
-              📅 {selectedDate.display} at {winningActivity.time}
-            </div>
-            <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
-              📍 {winningActivity.location}
-            </div>
-            <div style={{ fontSize: '14px', color: '#666' }}>
-              💰 {winningActivity.price}
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center">
+          <div className="text-6xl mb-4">📅</div>
+          <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>It's official!</h3>
+          <p className="text-gray-600 mb-6">Your meeting is scheduled</p>
+          
+          <div className="p-5 rounded-2xl mb-6" style={{ backgroundColor: colors.primary }}>
+            <div className="text-4xl mb-3">{winningActivity.emoji}</div>
+            <h4 className="text-lg font-bold text-white mb-2">{winningActivity.title}</h4>
+            <p className="text-white opacity-90 mb-3">{winningActivity.location}</p>
+            <div className="flex items-center justify-center gap-2 text-white">
+              <Calendar size={18} />
+              <span className="font-semibold">{selectedDate.display} at {winningActivity.time}</span>
             </div>
           </div>
-          <button
-            onClick={() => {
-              setShowEventConfirmation(false);
-              setScreen('chat');
-            }}
-            style={{
-              width: '100%',
-              padding: '16px',
-              borderRadius: '12px',
-              border: 'none',
-              backgroundColor: colors.primary,
-              color: colors.white,
-              fontSize: '18px',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
-          >
-            Go to Chat
-          </button>
         </div>
       </div>
     );
   };
 
-  const BottomNavigation = () => (
-    <div style={{
-      position: 'fixed',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      backgroundColor: colors.white,
-      display: 'flex',
-      justifyContent: 'space-around',
-      padding: '16px 0',
-      boxShadow: '0 -2px 10px rgba(0,0,0,0.1)'
-    }}>
-      <button
-        onClick={() => { setScreen('home'); setBottomNav('home'); }}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '4px',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          color: bottomNav === 'home' ? colors.primary : '#999'
-        }}
-      >
-        <Users size={24} />
-        <span style={{ fontSize: '12px' }}>Home</span>
-      </button>
-      <button
-        onClick={() => { setScreen('chat'); setBottomNav('circle'); }}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '4px',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          color: bottomNav === 'circle' ? colors.primary : '#999'
-        }}
-      >
-        <MessageCircle size={24} />
-        <span style={{ fontSize: '12px' }}>Chat</span>
-      </button>
-      <button
-        onClick={() => { setScreen('profile'); setBottomNav('profile'); }}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '4px',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          color: bottomNav === 'profile' ? colors.primary : '#999'
-        }}
-      >
-        <User size={24} />
-        <span style={{ fontSize: '12px' }}>Profile</span>
-      </button>
-    </div>
-  );
-
   if (loading) {
     return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        backgroundColor: colors.background
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '48px', marginBottom: '20px' }}>⭕</div>
-          <p style={{ color: colors.primary, fontSize: '18px' }}>Loading...</p>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: colors.white }}>
+        <div className="text-center">
+          <CircleLogo size={80} />
+          <p className="mt-4" style={{ color: colors.primary }}>Loading...</p>
         </div>
       </div>
     );
   }
 
   if (screen === 'welcome') return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: colors.primary }}>
-      <div className="text-center">
-        <h1 className="text-6xl mb-6" style={{ color: colors.white }}>⭕</h1>
-        <h2 className="text-4xl font-bold mb-4" style={{ color: colors.white }}>CIRQLE</h2>
-        <p className="text-xl mb-12" style={{ color: colors.white, opacity: 0.9 }}>
-          Make friends through group activities
-        </p>
-        <button
-          onClick={() => setScreen('auth')}
-          className="px-8 py-4 rounded-full text-lg font-semibold"
-          style={{ backgroundColor: colors.white, color: colors.primary }}
-        >
-          Get Started
+    <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: colors.white }}>
+      <CircleLogo size={100} />
+      <h1 className="text-5xl font-bold mt-6 mb-3" style={{ color: colors.primary, letterSpacing: '0.1em' }}>CIRQLE</h1>
+      <p className="text-xl mb-12" style={{ color: colors.deepBlue }}>Make real friends in small groups</p>
+      <button onClick={() => setScreen('auth')} className="px-10 py-4 rounded-full text-lg font-semibold shadow-lg" style={{ backgroundColor: colors.primary, color: colors.white }}>
+        Get Started
+      </button>
+    </div>
+  );
+
+  if (screen === 'auth') return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: colors.white }}>
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <CircleLogo size={80} />
+          <h1 className="text-4xl font-bold mt-4 mb-2" style={{ color: colors.primary, letterSpacing: '0.1em' }}>CIRQLE</h1>
+          <p style={{ color: colors.deepBlue }}>Meet people, not profiles</p>
+        </div>
+
+        <div className="p-6 rounded-3xl shadow-lg" style={{ backgroundColor: colors.white }}>
+          <div className="flex gap-2 mb-6">
+            <button onClick={() => { setAuthMode('login'); setAuthError(''); }} className="flex-1 py-2 rounded-lg font-semibold transition-colors" style={{ backgroundColor: authMode === 'login' ? colors.primary : colors.white, color: authMode === 'login' ? colors.white : colors.primary, border: `2px solid ${colors.primary}` }}>
+              Login
+            </button>
+            <button onClick={() => { setAuthMode('register'); setAuthError(''); }} className="flex-1 py-2 rounded-lg font-semibold transition-colors" style={{ backgroundColor: authMode === 'register' ? colors.primary : colors.white, color: authMode === 'register' ? colors.white : colors.primary, border: `2px solid ${colors.primary}` }}>
+              Register
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 px-4 py-3 rounded-lg border-2" style={{ borderColor: colors.primary + '50' }}>
+              <Mail size={20} color={colors.primary} />
+              <input type="email" value={authData.email} onChange={(e) => setAuthData({ ...authData, email: e.target.value })} placeholder="Email" className="flex-1 outline-none bg-transparent" onKeyPress={(e) => e.key === 'Enter' && (authMode === 'login' ? handleSignIn() : handleSignUp())} />
+            </div>
+
+            <div className="flex items-center gap-2 px-4 py-3 rounded-lg border-2" style={{ borderColor: colors.primary + '50' }}>
+              <Lock size={20} color={colors.primary} />
+              <input type="password" value={authData.password} onChange={(e) => setAuthData({ ...authData, password: e.target.value })} placeholder="Password" className="flex-1 outline-none bg-transparent" onKeyPress={(e) => e.key === 'Enter' && (authMode === 'login' ? handleSignIn() : handleSignUp())} />
+            </div>
+
+            {authError && (
+              <div className="p-3 rounded-lg text-sm text-center" style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
+                {authError}
+              </div>
+            )}
+
+            <button onClick={authMode === 'login' ? handleSignIn : handleSignUp} disabled={loading} className="w-full py-3 rounded-lg font-semibold shadow-lg disabled:opacity-50" style={{ backgroundColor: colors.primary, color: colors.white }}>
+              {loading ? 'Loading...' : authMode === 'login' ? 'Login' : 'Create Account'}
+            </button>
+          </div>
+        </div>
+
+        <button onClick={() => setScreen('welcome')} className="mt-4 w-full py-2 text-center" style={{ color: colors.primary }}>
+          ← Back
         </button>
       </div>
     </div>
   );
 
-  if (screen === 'auth') return (
-    <div className="min-h-screen px-6 py-12" style={{ backgroundColor: colors.background }}>
-      <div className="max-w-md mx-auto">
-        <h1 className="text-3xl font-bold mb-8" style={{ color: colors.deepBlue }}>
-          {authMode === 'login' ? 'Welcome Back' : 'Join CIRQLE'}
-        </h1>
+  if (screen === 'onboarding') {
+    const steps = [
+      { label: 'What\'s your name?', field: 'name', type: 'text', placeholder: 'Enter your name' },
+      { label: 'How old are you?', field: 'age', type: 'number', placeholder: 'Enter your age' },
+      { label: 'Add a photo', field: 'photo', type: 'file' },
+      { label: 'Which city are you in?', field: 'city', type: 'text', placeholder: 'Enter your city' }
+    ];
+    const step = steps[onboardingStep];
 
-        <form onSubmit={authMode === 'login' ? handleSignIn : handleSignUp} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2" style={{ color: colors.deepBlue }}>Email</label>
-            <div className="flex items-center gap-2 p-3 rounded-2xl" style={{ backgroundColor: colors.white }}>
-              <Mail size={20} color={colors.primary} />
-              <input
-                type="email"
-                value={authData.email}
-                onChange={(e) => setAuthData({ ...authData, email: e.target.value })}
-                className="flex-1 outline-none"
-                placeholder="your@email.com"
-                required
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2" style={{ color: colors.deepBlue }}>Password</label>
-            <div className="flex items-center gap-2 p-3 rounded-2xl" style={{ backgroundColor: colors.white }}>
-              <Lock size={20} color={colors.primary} />
-              <input
-                type="password"
-                value={authData.password}
-                onChange={(e) => setAuthData({ ...authData, password: e.target.value })}
-                className="flex-1 outline-none"
-                placeholder="••••••••"
-                required
-              />
-            </div>
-          </div>
-
-          {authError && (
-            <p className="text-red-500 text-sm">{authError}</p>
-          )}
-
-          <button
-            type="submit"
-            className="w-full py-3 rounded-full font-semibold"
-            style={{ backgroundColor: colors.primary, color: colors.white }}
-          >
-            {authMode === 'login' ? 'Sign In' : 'Sign Up'}
-          </button>
-        </form>
-
-        <p className="text-center mt-6 text-gray-600">
-          {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
-          <button
-            onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
-            className="font-semibold"
-            style={{ color: colors.primary }}
-          >
-            {authMode === 'login' ? 'Sign Up' : 'Sign In'}
-          </button>
-        </p>
-      </div>
-    </div>
-  );
-
-  if (screen === 'onboarding') return (
-    <div className="min-h-screen px-6 py-12" style={{ backgroundColor: colors.background }}>
-      <div className="max-w-md mx-auto">
-        <div className="mb-8">
-          <div className="flex gap-2 mb-4">
-            {[0, 1, 2, 3].map(i => (
-              <div
-                key={i}
-                className="h-1 flex-1 rounded-full"
-                style={{ backgroundColor: i <= onboardingStep ? colors.primary : '#E5E7EB' }}
-              />
+    return (
+      <div className="min-h-screen px-6 py-12" style={{ backgroundColor: colors.white }}>
+        <div className="max-w-md mx-auto">
+          <div className="flex gap-2 mb-6">
+            {steps.map((_, idx) => (
+              <div key={idx} className="h-2 flex-1 rounded-full" style={{ backgroundColor: idx <= onboardingStep ? colors.primary : '#E5E7EB' }} />
             ))}
           </div>
-          <p className="text-sm text-gray-600">Step {onboardingStep + 1} of 4</p>
-        </div>
-
-        {onboardingStep === 0 && (
-          <div>
-            <h2 className="text-2xl font-bold mb-6" style={{ color: colors.deepBlue }}>What's your name?</h2>
-            <input
-              type="text"
-              value={userData.name}
-              onChange={(e) => setUserData({ ...userData, name: e.target.value })}
-              placeholder="Enter your name"
-              className="w-full p-4 rounded-2xl mb-4"
-              style={{ backgroundColor: colors.white }}
-            />
-            <button
-              onClick={() => userData.name && setOnboardingStep(1)}
-              disabled={!userData.name}
-              className="w-full py-3 rounded-full font-semibold"
-              style={{
-                backgroundColor: userData.name ? colors.primary : '#E5E7EB',
-                color: userData.name ? colors.white : '#999'
-              }}
-            >
-              Continue
-            </button>
-          </div>
-        )}
-
-        {onboardingStep === 1 && (
-          <div>
-            <h2 className="text-2xl font-bold mb-6" style={{ color: colors.deepBlue }}>How old are you?</h2>
-            <input
-              type="number"
-              value={userData.age}
-              onChange={(e) => setUserData({ ...userData, age: e.target.value })}
-              placeholder="Age"
-              className="w-full p-4 rounded-2xl mb-4"
-              style={{ backgroundColor: colors.white }}
-            />
-            <div className="flex gap-3">
-              <button
-                onClick={() => setOnboardingStep(0)}
-                className="flex-1 py-3 rounded-full font-semibold border-2"
-                style={{ borderColor: colors.primary, color: colors.primary }}
-              >
-                Back
-              </button>
-              <button
-                onClick={() => userData.age && setOnboardingStep(2)}
-                disabled={!userData.age}
-                className="flex-1 py-3 rounded-full font-semibold"
-                style={{
-                  backgroundColor: userData.age ? colors.primary : '#E5E7EB',
-                  color: userData.age ? colors.white : '#999'
-                }}
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        )}
-
-        {onboardingStep === 2 && (
-          <div>
-            <h2 className="text-2xl font-bold mb-6" style={{ color: colors.deepBlue }}>Add a photo</h2>
-            <div className="text-center mb-6">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handlePhotoUpload}
-                className="hidden"
-              />
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="w-32 h-32 mx-auto mb-4 rounded-full flex items-center justify-center cursor-pointer"
-                style={{
-                  backgroundColor: colors.white,
-                  border: `3px dashed ${colors.primary}`
-                }}
-              >
-                {userData.photo ? (
-                  <img src={userData.photo} alt="Profile" className="w-full h-full rounded-full object-cover" />
-                ) : (
+          <h2 className="text-3xl font-bold mb-6" style={{ color: colors.deepBlue }}>{step.label}</h2>
+          
+          {step.type === 'file' ? (
+            <div className="mb-8">
+              {userData.photo ? (
+                <div className="text-center">
+                  <img src={userData.photo} alt="Profile" className="w-32 h-32 rounded-full object-cover mx-auto mb-4 shadow-lg border-4" style={{ borderColor: colors.primary }} />
+                  <button onClick={() => fileInputRef.current?.click()} className="px-4 py-2 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>
+                    Change Photo
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center w-full h-48 border-4 border-dashed rounded-3xl cursor-pointer" style={{ borderColor: colors.primary }}>
                   <Camera size={48} color={colors.primary} />
-                )}
-              </div>
-              <p className="text-sm text-gray-600">Tap to upload</p>
+                  <span className="mt-2" style={{ color: colors.primary }}>Tap to upload photo</span>
+                </button>
+              )}
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
             </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setOnboardingStep(1)}
-                className="flex-1 py-3 rounded-full font-semibold border-2"
-                style={{ borderColor: colors.primary, color: colors.primary }}
-              >
-                Back
-              </button>
-              <button
-                onClick={() => setOnboardingStep(3)}
-                className="flex-1 py-3 rounded-full font-semibold"
-                style={{ backgroundColor: colors.primary, color: colors.white }}
-              >
-                {userData.photo ? 'Continue' : 'Skip'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {onboardingStep === 3 && (
-          <div>
-            <h2 className="text-2xl font-bold mb-6" style={{ color: colors.deepBlue }}>Where are you?</h2>
-            <div className="flex items-center gap-2 p-4 rounded-2xl mb-4" style={{ backgroundColor: colors.white }}>
-              <MapPin size={20} color={colors.primary} />
-              <input
-                type="text"
-                value={userData.city}
-                onChange={(e) => setUserData({ ...userData, city: e.target.value })}
-                placeholder="City"
-                className="flex-1 outline-none"
-              />
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setOnboardingStep(2)}
-                className="flex-1 py-3 rounded-full font-semibold border-2"
-                style={{ borderColor: colors.primary, color: colors.primary }}
-              >
-                Back
-              </button>
-              <button
-                onClick={() => userData.city && setScreen('interests')}
-                disabled={!userData.city}
-                className="flex-1 py-3 rounded-full font-semibold"
-                style={{
-                  backgroundColor: userData.city ? colors.primary : '#E5E7EB',
-                  color: userData.city ? colors.white : '#999'
-                }}
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        )}
+          ) : (
+            <input type={step.type} value={userData[step.field]} onChange={(e) => setUserData({ ...userData, [step.field]: e.target.value })} placeholder={step.placeholder} className="w-full px-6 py-4 rounded-full text-lg border-2 mb-6" style={{ borderColor: colors.primary + '50' }} />
+          )}
+          
+          <button onClick={handleOnboardingNext} disabled={!userData[step.field]} className="w-full py-4 rounded-full text-lg font-semibold disabled:opacity-50" style={{ backgroundColor: colors.primary, color: colors.white }}>Continue</button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   if (screen === 'interests') return (
-    <div className="min-h-screen px-6 py-12" style={{ backgroundColor: colors.background }}>
-      <div className="max-w-md mx-auto">
-        <h2 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>What are you into?</h2>
-        <p className="text-gray-600 mb-6">Select at least 3 interests</p>
+    <div className="min-h-screen px-6 py-12" style={{ backgroundColor: colors.white }}>
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center mb-8">
+          <CircleLogo size={60} />
+          <h1 className="text-2xl font-bold mt-4" style={{ color: colors.primary, letterSpacing: '0.1em' }}>CIRQLE</h1>
+          <p className="text-sm mt-2" style={{ color: colors.deepBlue }}>Make real friends in small groups</p>
+        </div>
+        
+        {!session && (
+          <div className="mb-4 p-4 rounded-lg" style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
+            ⚠️ Warning: No active session detected.
+          </div>
+        )}
+        
+        <h2 className="text-3xl font-bold mb-2" style={{ color: colors.deepBlue }}>Pick your interests</h2>
+        <p className="text-gray-600 mb-8">Select at least 3 things you enjoy</p>
 
-        <div className="grid grid-cols-2 gap-3 mb-8">
-          {INTERESTS.map(interest => (
-            <button
-              key={interest}
-              onClick={() => toggleInterest(interest)}
-              className="p-4 rounded-2xl font-medium text-left"
-              style={{
-                backgroundColor: userData.interests.includes(interest) ? colors.primary : colors.white,
-                color: userData.interests.includes(interest) ? colors.white : colors.deepBlue
-              }}
-            >
-              {interest}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-3 mb-8">
+          {INTERESTS.map(i => {
+            const selected = userData.interests.includes(i);
+            return (
+              <button key={i} onClick={() => toggleInterest(i)} className="px-6 py-3 rounded-full font-medium" style={{ backgroundColor: selected ? colors.primary : colors.white, color: selected ? colors.white : colors.primary, border: `2px solid ${colors.primary}` }}>
+                {i}
+              </button>
+            );
+          })}
         </div>
 
-        <button
-          onClick={completeOnboarding}
-          disabled={userData.interests.length < 3}
-          className="w-full py-3 rounded-full font-semibold"
-          style={{
-            backgroundColor: userData.interests.length >= 3 ? colors.primary : '#E5E7EB',
-            color: userData.interests.length >= 3 ? colors.white : '#999'
-          }}
-        >
-          Find My Cirqle ({userData.interests.length}/3)
+        <div className="text-center mb-4">
+          <span className="font-medium" style={{ color: colors.primary }}>{userData.interests.length} selected</span>
+        </div>
+
+        <button onClick={findAndCreateCircle} disabled={userData.interests.length < 3 || loading} className="w-full py-4 rounded-full text-lg font-semibold disabled:opacity-50" style={{ backgroundColor: colors.primary, color: colors.white }}>
+          {loading ? 'Finding your Cirqle...' : 'Join Cirqle'}
         </button>
       </div>
     </div>
   );
 
   if (screen === 'voting') {
-    const currentActivity = votingActivities[currentVotingIndex];
-    
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: colors.background }}>
-        <div className="w-full max-w-md">
-          <div className="mb-8">
-            <p className="text-center text-sm text-gray-600 mb-2">
-              Activity {currentVotingIndex + 1} of {votingActivities.length}
-            </p>
-            <div className="flex gap-1">
-              {votingActivities.map((_, i) => (
-                <div
-                  key={i}
-                  className="h-1 flex-1 rounded-full"
-                  style={{ backgroundColor: i <= currentVotingIndex ? colors.primary : '#E5E7EB' }}
-                />
-              ))}
+    if (currentVotingIndex >= votingActivities.length) {
+      return (
+        <>
+          <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: colors.background }}>
+            <div className="text-center">
+              <div className="text-6xl mb-4">⏳</div>
+              <p className="text-xl font-semibold" style={{ color: colors.deepBlue }}>Calculating results...</p>
             </div>
           </div>
+          <WinnerModal />
+        </>
+      );
+    }
+    
+    const activity = votingActivities[currentVotingIndex];
+    
+    return (
+      <div className="min-h-screen flex flex-col" style={{ backgroundColor: colors.background }}>
+        <div className="px-6 py-4 shadow-sm" style={{ backgroundColor: colors.white }}>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xl font-semibold" style={{ color: colors.deepBlue }}>Rate Activities</h3>
+            <span className="text-sm font-medium px-3 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>
+              {currentVotingIndex + 1}/{votingActivities.length}
+            </span>
+          </div>
+          <p className="text-sm text-gray-600">Your Cirqle will do the highest-rated activity</p>
+        </div>
 
-          {currentActivity && (
-            <div className="p-8 rounded-3xl mb-6" style={{ backgroundColor: colors.white }}>
-              <div className="text-center mb-6">
-                <div className="text-6xl mb-4">{currentActivity.emoji}</div>
-                <h2 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>
-                  {currentActivity.title}
-                </h2>
-                <p className="text-gray-600 mb-3">{currentActivity.description}</p>
-                <div className="flex items-center justify-center gap-4 text-sm text-gray-600">
-                  <span>📍 {currentActivity.location}</span>
-                  <span>🕐 {currentActivity.time}</span>
-                </div>
-                <p className="mt-2 font-semibold" style={{ color: colors.primary }}>
-                  {currentActivity.price}
-                </p>
+        <div className="flex-1 flex items-center justify-center px-6 py-8">
+          <div className="w-full max-w-md">
+            <div className="bg-white rounded-3xl shadow-xl overflow-hidden mb-8">
+              <div className="h-48 flex items-center justify-center text-7xl" style={{ backgroundColor: colors.background }}>
+                {activity.emoji}
               </div>
+              <div className="p-6">
+                <h3 className="text-2xl font-bold mb-2" style={{ color: colors.deepBlue }}>{activity.title}</h3>
+                <p className="text-gray-600 mb-4">{activity.description}</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-lg font-semibold" style={{ color: colors.primary }}>{activity.price}</span>
+                  <span className="text-sm text-gray-500">For your group of {currentCircle?.members.length || 2}</span>
+                </div>
+              </div>
+            </div>
 
-              <div className="space-y-3">
-                <p className="text-center font-medium mb-4" style={{ color: colors.deepBlue }}>
-                  How interested are you?
-                </p>
-                {[4, 3, 2, 1].map(rating => (
+            <div className="mb-6">
+              <p className="text-center font-semibold mb-4" style={{ color: colors.deepBlue }}>How much do you want to do this?</p>
+              <div className="flex justify-center gap-4">
+                {[1, 2, 3, 4].map(rating => (
                   <button
                     key={rating}
-                    onClick={() => voteForActivity(currentActivity.id, rating)}
-                    className="w-full p-4 rounded-2xl flex items-center justify-between"
-                    style={{ backgroundColor: colors.background }}
+                    onClick={() => voteForActivity(activity.id, rating)}
+                    className="flex flex-col items-center gap-2 p-4 rounded-2xl transition-all hover:scale-105"
+                    style={{ backgroundColor: colors.white, border: `2px solid ${colors.primary}` }}
                   >
-                    <span style={{ color: colors.deepBlue }}>
-                      {rating === 4 && "❤️ Love it!"}
-                      {rating === 3 && "👍 Sounds good"}
-                      {rating === 2 && "🤔 Maybe"}
-                      {rating === 1 && "😐 Not really"}
-                    </span>
                     <div className="flex gap-1">
                       {[...Array(rating)].map((_, i) => (
-                        <Star key={i} size={16} color={colors.primary} fill={colors.primary} />
+                        <Star key={i} size={20} fill={colors.primary} color={colors.primary} />
                       ))}
                     </div>
+                    <span className="text-sm font-semibold" style={{ color: colors.primary }}>{rating}</span>
                   </button>
                 ))}
               </div>
             </div>
-          )}
+            <p className="text-center text-sm text-gray-500">Rate from 1 to 4</p>
+          </div>
         </div>
       </div>
     );
   }
 
   if (screen === 'chat') return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: colors.background }}>
-      <div className="p-4 flex items-center justify-between" style={{ backgroundColor: colors.white }}>
-        <div className="flex items-center gap-3">
-          <button onClick={() => setScreen('home')}>
-            <ArrowLeft size={24} color={colors.primary} />
-          </button>
-          <div>
-            <h2 className="font-bold" style={{ color: colors.deepBlue }}>Your Cirqle</h2>
-            <p className="text-sm text-gray-600">{currentCircle?.members.length || 0} members</p>
-          </div>
-        </div>
-        <button onClick={() => setScreen('members')}>
-          <Users size={24} color={colors.primary} />
-        </button>
+    <div className="h-screen flex flex-col pb-20" style={{ backgroundColor: colors.background }}>
+      <div className="px-6 py-4 shadow-sm" style={{ backgroundColor: colors.white }}>
+        <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
+        <p className="text-sm text-gray-600">{currentCircle?.members.length || 0} members</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 pb-20">
-        <div className="mb-4">
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {currentCircle?.members.map(member => (
-              <div key={member.id} className="flex flex-col items-center min-w-[70px]">
-                <div
-                  className="w-14 h-14 rounded-full flex items-center justify-center text-2xl mb-1"
-                  style={{ backgroundColor: colors.white, border: `2px solid ${colors.primary}` }}
-                >
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        {/* 🔥 MEMBERS ANGEZEIGT DIREKT IM CHAT! */}
+        <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.white }}>
+          <h4 className="font-semibold mb-4 flex items-center gap-2" style={{ color: colors.deepBlue }}>
+            <Users size={20} color={colors.primary} />
+            Circle Members
+          </h4>
+          <div className="space-y-3">
+            {currentCircle?.members.map((member, idx) => (
+              <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl" style={{ backgroundColor: colors.background }}>
+                <div className="w-12 h-12 rounded-full flex items-center justify-center text-2xl border-2" 
+                  style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
                   {member.photo || '👤'}
                 </div>
-                <span className="text-xs text-center" style={{ color: colors.deepBlue }}>
-                  {member.name.split(' ')[0]}
-                </span>
+                <div className="flex-1">
+                  <p className="font-bold" style={{ color: colors.deepBlue }}>{member.name || 'Member'}</p>
+                  <p className="text-xs text-gray-600">{member.age} years • {currentCircle.city}</p>
+                </div>
+                {member.id === currentUser?.id && (
+                  <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>You</span>
+                )}
               </div>
             ))}
           </div>
@@ -1815,55 +1386,12 @@ function App() {
     </div>
   );
 
-  if (screen === 'members') return (
-    <div className="min-h-screen pb-20 px-6 py-8" style={{ backgroundColor: colors.background }}>
-      <div className="flex items-center gap-3 mb-8">
-        <button onClick={() => setScreen('chat')}>
-          <ArrowLeft size={24} color={colors.primary} />
-        </button>
-        <h1 className="text-3xl font-bold" style={{ color: colors.deepBlue }}>Members</h1>
-      </div>
-
-      <div className="space-y-4">
-        {currentCircle?.members.map(member => (
-          <div key={member.id} className="p-6 rounded-3xl" style={{ backgroundColor: colors.white }}>
-            <div className="flex items-center gap-4 mb-4">
-              <div
-                className="w-16 h-16 rounded-full flex items-center justify-center text-3xl"
-                style={{ backgroundColor: colors.background, border: `2px solid ${colors.primary}` }}
-              >
-                {member.photo || '👤'}
-              </div>
-              <div>
-                <h3 className="text-lg font-bold" style={{ color: colors.deepBlue }}>{member.name}</h3>
-                <p className="text-gray-600">{member.age} years old</p>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm font-medium mb-2" style={{ color: colors.deepBlue }}>Interests</p>
-              <div className="flex flex-wrap gap-2">
-                {member.interests?.map(interest => (
-                  <span key={interest} className="px-3 py-1 rounded-full text-sm" style={{ backgroundColor: colors.background, color: colors.primary }}>
-                    {interest}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-      
-      <BottomNavigation />
-    </div>
-  );
-
   return (
     <div className="font-sans">
       <MatchingNotification />
       <WinnerModal />
       <MatchAnimationModal />
       <EventConfirmationModal />
-      <MatchRevealModal />
     </div>
   );
 }
