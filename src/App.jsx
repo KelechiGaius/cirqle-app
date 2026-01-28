@@ -112,10 +112,14 @@ function App() {
   const [bottomNav, setBottomNav] = useState('circle');
   
   const [showMatchAnimation, setShowMatchAnimation] = useState(false);
+  const [matchRevealCardIndex, setMatchRevealCardIndex] = useState(0);
+  const [matchRevealDragX, setMatchRevealDragX] = useState(0);
+  const matchRevealTouchStart = useRef(null);
   
   const chatEndRef = useRef(null);
   const messagesSubscription = useRef(null);
   const fileInputRef = useRef(null);
+  const chatImageInputRef = useRef(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -256,11 +260,37 @@ function App() {
     }
   };
 
-  // 🔥 FIX: Real-time Chat - Optimiert
+  // 🔥 Real-time Chat: Subscription + Polling-Fallback für Live-Updates
   useEffect(() => {
     if (!currentCircle?.id) return;
     
-    loadMessages();
+    const load = () => {
+      if (currentCircle?.id) {
+        supabase
+          .from('messages')
+          .select('*')
+          .eq('circle_id', currentCircle.id)
+          .order('created_at', { ascending: true })
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('❌ Error loading messages:', error);
+              return;
+            }
+            if (data) {
+              setMessages(data.map(m => ({
+                id: m.id,
+                user: m.sender_name || 'Unknown',
+                text: m.text ?? '',
+                image_url: m.image_url ?? null,
+                userId: m.user_id,
+                timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              })));
+            }
+          });
+      }
+    };
+    
+    load();
 
     const channel = supabase
       .channel(`messages:${currentCircle.id}`)
@@ -274,47 +304,73 @@ function App() {
         (payload) => {
           const newMessage = payload.new;
           setMessages(prev => {
-            // Prevent duplicates
             if (prev.some(m => m.id === newMessage.id)) return prev;
             return [...prev, {
               id: newMessage.id,
               user: newMessage.sender_name || 'Unknown',
-              text: newMessage.text,
+              text: newMessage.text ?? '',
+              image_url: newMessage.image_url ?? null,
               userId: newMessage.user_id,
               timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }];
           });
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') console.log('✅ Realtime messages subscribed');
+      });
+
+    messagesSubscription.current = channel;
 
     return () => {
-      supabase.removeChannel(channel);
+      if (messagesSubscription.current) {
+        supabase.removeChannel(messagesSubscription.current);
+        messagesSubscription.current = null;
+      }
     };
   }, [currentCircle?.id]);
 
+  // Polling-Fallback: neue Nachrichten auch ohne Realtime (z.B. wenn Replication aus ist)
+  useEffect(() => {
+    const circleId = currentCircle?.id;
+    if (screen !== 'chat' || !circleId) return;
+    const interval = setInterval(async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('circle_id', circleId)
+        .order('created_at', { ascending: true });
+      if (!error && data) {
+        setMessages(data.map(m => ({
+          id: m.id,
+          user: m.sender_name || 'Unknown',
+          text: m.text ?? '',
+          image_url: m.image_url ?? null,
+          userId: m.user_id,
+          timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        })));
+      }
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [screen, currentCircle?.id]);
+
   const loadMessages = async () => {
     if (!currentCircle) return;
-
-    console.log('📨 Loading messages for circle:', currentCircle.id);
-    
     const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('circle_id', currentCircle.id)
       .order('created_at', { ascending: true });
-
     if (error) {
       console.error('❌ Error loading messages:', error);
       return;
     }
-
     if (data) {
-      console.log('✅ Messages loaded:', data.length);
       setMessages(data.map(m => ({
         id: m.id,
         user: m.sender_name || 'Unknown',
-        text: m.text,
+        text: m.text ?? '',
+        image_url: m.image_url ?? null,
         userId: m.user_id,
         timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       })));
@@ -654,20 +710,18 @@ function App() {
   };
 
   const startDatePoll = () => {
-    console.log('Starting date poll...');
     const dates = generateDateOptions();
     setDateOptions(dates);
     setShowWinnerModal(false);
-    
+    setMatchRevealCardIndex(0);
+    setMatchRevealDragX(0);
     setShowMatchAnimation(true);
-    console.log('✅ Showing match animation');
-    
-    setTimeout(() => {
-      setShowMatchAnimation(false);
-      setShowDatePoll(true);
-      setScreen('chat');
-      console.log('✅ Navigated to chat with date poll');
-    }, 3000);
+  };
+
+  const finishMatchReveal = () => {
+    setShowMatchAnimation(false);
+    setShowDatePoll(true);
+    setScreen('chat');
   };
 
   const voteForDate = async (dateId) => {
@@ -782,44 +836,47 @@ function App() {
     }
   };
 
-  const sendMessage = async () => {
-    if (!messageInput.trim()) {
-      console.log('❌ Empty message');
+  const sendMessage = async (textOverride = null, imageUrl = null) => {
+    const text = ((textOverride ?? messageInput) || '').trim();
+    if (!text && !imageUrl) return;
+    if (!currentCircle || !currentUser) {
+      alert(!currentCircle ? 'Not in a circle' : 'Not logged in');
       return;
     }
-    
-    if (!currentCircle) {
-      console.log('❌ No circle');
-      alert('Not in a circle');
-      return;
-    }
-    
-    if (!currentUser) {
-      console.log('❌ No user');
-      alert('Not logged in');
-      return;
-    }
-
-    console.log('📤 Sending message:', messageInput);
-
     try {
-      const { data, error } = await supabase
-        .from('messages')
-        .insert([{
-          circle_id: currentCircle.id,
-          user_id: currentUser.id,
-          sender_name: currentUser.name,
-          text: messageInput
-        }])
-        .select();
-
+      const row = {
+        circle_id: currentCircle.id,
+        user_id: currentUser.id,
+        sender_name: currentUser.name,
+        text: text || (imageUrl ? '' : ''),
+        ...(imageUrl ? { image_url: imageUrl } : {})
+      };
+      const { error } = await supabase.from('messages').insert([row]).select();
       if (error) throw error;
-      
-      console.log('✅ Message sent successfully:', data);
-      setMessageInput('');
+      if (!imageUrl) setMessageInput('');
     } catch (error) {
       console.error('❌ Error sending message:', error);
       alert('Error sending message: ' + error.message);
+    }
+  };
+
+  const handleChatImageUpload = async (e) => {
+    const file = e.target?.files?.[0];
+    if (!file || !currentCircle || !currentUser) return;
+    e.target.value = '';
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${currentCircle.id}/${currentUser.id}/${Date.now()}.${ext}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('chat-images')
+        .upload(path, file, { cacheControl: '3600', upsert: false });
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(uploadData.path);
+      const publicUrl = urlData?.publicUrl;
+      if (publicUrl) await sendMessage('', publicUrl);
+    } catch (err) {
+      console.error('❌ Chat image upload failed:', err);
+      alert('Bild konnte nicht gesendet werden. Prüfe Supabase: Bucket "chat-images" angelegt?');
     }
   };
 
@@ -874,38 +931,142 @@ function App() {
 
   const MatchAnimationModal = () => {
     if (!showMatchAnimation || !currentCircle) return null;
-    
     const otherMembers = currentCircle.members.filter(m => m.id !== currentUser?.id);
-    
+    const myInterests = (currentUser?.interests || userData.interests || []);
+    const total = Math.max(1, otherMembers.length);
+    const index = Math.min(matchRevealCardIndex, total - 1);
+
+    const goNext = () => {
+      if (index < total - 1) {
+        setMatchRevealCardIndex(index + 1);
+        setMatchRevealDragX(0);
+      }
+    };
+    const goPrev = () => {
+      if (index > 0) {
+        setMatchRevealCardIndex(index - 1);
+        setMatchRevealDragX(0);
+      }
+    };
+
+    const handleTouchStart = (e) => {
+      matchRevealTouchStart.current = e.touches[0].clientX;
+    };
+    const handleTouchMove = (e) => {
+      if (matchRevealTouchStart.current == null) return;
+      setMatchRevealDragX(e.touches[0].clientX - matchRevealTouchStart.current);
+    };
+    const handleTouchEnd = () => {
+      if (matchRevealTouchStart.current == null) return;
+      const dx = matchRevealDragX;
+      matchRevealTouchStart.current = null;
+      setMatchRevealDragX(0);
+      if (dx < -60) goNext();
+      else if (dx > 60) goPrev();
+    };
+
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center animate-bounce-once">
-          <div className="text-6xl mb-4">🎉</div>
-          <h3 className="text-2xl font-bold mb-4" style={{ color: colors.deepBlue }}>You matched with!</h3>
-          
-          <div className="flex justify-center gap-4 mb-6">
-            {otherMembers.map((member, i) => (
-              <div key={i} className="text-center">
-                {member.photo && typeof member.photo === 'string' && member.photo.startsWith('http') ? (
-                  <img 
-                    src={member.photo} 
-                    alt={member.name}
-                    className="w-24 h-24 rounded-full object-cover mx-auto mb-2 border-4"
-                    style={{ borderColor: colors.primary }}
-                  />
-                ) : (
-                  <div className="w-24 h-24 rounded-full flex items-center justify-center text-4xl mx-auto mb-2 border-4" 
-                    style={{ borderColor: colors.primary, backgroundColor: colors.background }}>
-                    {member.photo || '👤'}
-                  </div>
-                )}
-                <p className="font-bold" style={{ color: colors.primary }}>{member.name}</p>
-                <p className="text-sm text-gray-600">{member.age} years</p>
-              </div>
-            ))}
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4" style={{ animation: 'matchRevealFadeIn 0.3s ease-out' }}>
+        <div className="bg-white rounded-3xl p-6 max-w-md w-full overflow-hidden" style={{ animation: 'matchRevealScaleIn 0.35s ease-out' }}>
+          <div className="text-center mb-2">
+            <span className="text-4xl">🎉</span>
+            <h3 className="text-xl font-bold mt-2" style={{ color: colors.deepBlue }}>Du hast gematched mit</h3>
+            <p className="text-sm text-gray-500">Swipe für nächste Person · {index + 1} / {total}</p>
           </div>
-          
-          <p className="text-gray-600">Let's pick a date for your activity!</p>
+
+          <div
+            className="relative overflow-hidden rounded-2xl mx-auto touch-pan-y"
+            style={{ minHeight: 320 }}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
+          >
+            {otherMembers.length === 0 ? (
+              <div className="py-12 text-gray-500">Keine anderen Mitglieder in diesem Circle.</div>
+            ) : (
+              <div
+                className="flex transition-transform duration-300 ease-out"
+                style={{
+                  transform: `translateX(calc(-${index * 100}% + ${matchRevealDragX}px))`,
+                  width: `${total * 100}%`
+                }}
+              >
+                {otherMembers.map((m, i) => {
+                  const shared = (m.interests || []).filter((x) => myInterests.includes(x));
+                  return (
+                    <div key={m.id} className="flex-shrink-0 w-full max-w-full px-1" style={{ width: `${100 / total}%` }}>
+                      <div className="rounded-2xl border-2 p-4 text-center" style={{ borderColor: colors.primary + '40', backgroundColor: colors.background }}>
+                        {m.photo && typeof m.photo === 'string' && m.photo.startsWith('http') ? (
+                          <img src={m.photo} alt={m.name} className="w-28 h-28 rounded-full object-cover mx-auto mb-3 border-4" style={{ borderColor: colors.primary }} />
+                        ) : (
+                          <div className="w-28 h-28 rounded-full flex items-center justify-center text-4xl mx-auto mb-3 border-4" style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
+                            {m.photo || '👤'}
+                          </div>
+                        )}
+                        <p className="font-bold text-lg" style={{ color: colors.deepBlue }}>{m.name}</p>
+                        <p className="text-sm text-gray-600">{m.age} Jahre</p>
+                        {shared.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-xs font-medium text-gray-500 mb-1">Gemeinsame Interessen</p>
+                            <div className="flex flex-wrap justify-center gap-1">
+                              {shared.slice(0, 5).map((s, j) => (
+                                <span key={j} className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: colors.primary + '25', color: colors.primary }}>
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between mt-4">
+            <button
+              type="button"
+              onClick={goPrev}
+              disabled={index === 0}
+              className="p-2 rounded-full disabled:opacity-30"
+              style={{ backgroundColor: index === 0 ? colors.background : colors.primary + '20', color: colors.primary }}
+            >
+              <ChevronLeft size={24} />
+            </button>
+            <div className="flex gap-1">
+              {otherMembers.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => { setMatchRevealCardIndex(i); setMatchRevealDragX(0); }}
+                  className="w-2 h-2 rounded-full transition-all"
+                  style={{ backgroundColor: i === index ? colors.primary : colors.background, width: i === index ? 10 : 8, height: 8 }}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={index < total - 1 ? goNext : finishMatchReveal}
+              className="p-2 rounded-full min-w-[44px] flex items-center justify-center"
+              style={{ backgroundColor: colors.primary, color: colors.white }}
+            >
+              {index < total - 1 ? <ChevronRight size={24} /> : 'Weiter'}
+            </button>
+          </div>
+
+          {total > 0 && (
+            <button
+              type="button"
+              onClick={finishMatchReveal}
+              className="w-full mt-3 py-2.5 rounded-full text-sm font-medium"
+              style={{ backgroundColor: colors.primary + '20', color: colors.primary }}
+            >
+              Datum wählen →
+            </button>
+          )}
         </div>
       </div>
     );
@@ -1296,17 +1457,21 @@ function App() {
           <div className="space-y-3">
             {messages.map(msg => {
               const isOwnMessage = msg.userId === currentUser?.id;
+              const hasImage = msg.image_url && typeof msg.image_url === 'string' && (msg.image_url.startsWith('http') || msg.image_url.startsWith('https'));
               return (
                 <div key={msg.id} className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
                   <span className="text-xs text-gray-500 mb-1">{msg.user}</span>
                   <div 
-                    className="p-3 rounded-3xl max-w-xs" 
+                    className="p-3 rounded-3xl max-w-xs overflow-hidden" 
                     style={{ 
                       backgroundColor: isOwnMessage ? colors.primary : colors.white,
                       color: isOwnMessage ? colors.white : colors.deepBlue
                     }}
                   >
-                    <p>{msg.text}</p>
+                    {hasImage ? (
+                      <img src={msg.image_url} alt="Chat" className="rounded-2xl max-w-full max-h-64 object-cover block" />
+                    ) : null}
+                    {msg.text ? <p className={hasImage ? 'mt-2' : ''}>{msg.text}</p> : null}
                     <span className={`text-xs mt-1 block ${isOwnMessage ? 'text-white opacity-75' : 'text-gray-400'}`}>
                       {msg.timestamp}
                     </span>
@@ -1319,21 +1484,37 @@ function App() {
         )}
       </div>
 
-      {/* 🔥 FIX: Fixed Input Box - AUSSERHALB des scroll containers */}
+      {/* Chat-Eingabe: Text + Bild */}
       <div className="fixed bottom-16 left-0 right-0 p-4" style={{ backgroundColor: colors.white, borderTop: `1px solid ${colors.background}` }}>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <input 
             type="text" 
             value={messageInput} 
             onChange={(e) => setMessageInput(e.target.value)} 
             onKeyPress={(e) => e.key === 'Enter' && sendMessage()} 
-            placeholder="Type a message..." 
+            placeholder="Nachricht..." 
             className="flex-1 px-4 py-3 rounded-full border-2" 
             style={{ borderColor: colors.primary + '50' }} 
           />
+          <input
+            ref={chatImageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleChatImageUpload}
+          />
+          <button
+            type="button"
+            onClick={() => chatImageInputRef.current?.click()}
+            className="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center"
+            style={{ backgroundColor: colors.background, color: colors.primary }}
+            title="Bild senden"
+          >
+            <ImageIcon size={22} />
+          </button>
           <button 
-            onClick={sendMessage} 
-            className="w-12 h-12 rounded-full flex items-center justify-center" 
+            onClick={() => sendMessage()} 
+            className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" 
             style={{ backgroundColor: colors.primary }}
           >
             <Send size={20} color={colors.white} />
