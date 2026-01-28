@@ -256,6 +256,7 @@ function App() {
     }
   };
 
+  // 🔥 FIX: Real-time Chat - Optimiert
   useEffect(() => {
     if (!currentCircle?.id) return;
     
@@ -333,7 +334,7 @@ function App() {
       if (error) throw error;
 
       setAuthData({ email: '', password: '' });
-      setOnboardingStep(0); // Reset onboarding
+      setOnboardingStep(0);
       setScreen('onboarding');
       setLoading(false);
       console.log('✅ Registered successfully, redirecting to onboarding');
@@ -551,6 +552,7 @@ function App() {
       setLoading(false);
     }
   };
+
   const voteForActivity = (activityId, rating) => {
     console.log(`🗳️ Voted for ${activityId} with ${rating} stars`);
     const newVotes = { ...userVotes, [activityId]: rating };
@@ -562,17 +564,6 @@ function App() {
     } else {
       console.log('🏁 LAST VOTE! Calling finishVoting...');
       finishVoting(newVotes);
-      
-      setTimeout(() => {
-        if (!showWinnerModal) {
-          console.error('⚠️ EMERGENCY: Winner modal did not appear! Forcing it now...');
-          if (votingActivities.length > 0) {
-            const emergencyWinner = votingActivities[Math.floor(Math.random() * votingActivities.length)];
-            setWinningActivity({ ...emergencyWinner, score: '4.0' });
-            setShowWinnerModal(true);
-          }
-        }
-      }, 5000);
     }
   };
 
@@ -668,7 +659,6 @@ function App() {
     setDateOptions(dates);
     setShowWinnerModal(false);
     
-    // Show match animation immediately
     setShowMatchAnimation(true);
     console.log('✅ Showing match animation');
     
@@ -728,10 +718,6 @@ function App() {
       alert('Please enter your age');
       return;
     }
-    if (onboardingStep === 2 && !userData.photo) {
-      alert('Please add a photo');
-      return;
-    }
     if (onboardingStep === 3 && !userData.city) {
       alert('Please enter your city');
       return;
@@ -744,15 +730,47 @@ function App() {
     }
   };
 
-  const handlePhotoUpload = (e) => {
+  // 🔥 FIX: Photo Upload mit Supabase Storage
+  const handlePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setUserData({ ...userData, photo: reader.result });
-    };
-    reader.readAsDataURL(file);
+    try {
+      console.log('📸 Uploading photo...');
+      
+      // Create unique filename
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `${session.user.id}/${fileName}`;
+
+      // Upload to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw uploadError;
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      console.log('✅ Photo uploaded:', urlData.publicUrl);
+      setUserData({ ...userData, photo: urlData.publicUrl });
+      
+    } catch (error) {
+      console.error('❌ Photo upload error:', error);
+      alert('Error uploading photo. Using emoji instead.');
+      // Fallback to file reader for local preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUserData({ ...userData, photo: '👤' });
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const toggleInterest = (interest) => {
@@ -846,7 +864,7 @@ function App() {
           <p className="text-gray-600 mb-4">Matched with {currentCircle?.members.length} people</p>
           <div className="flex justify-center gap-2 flex-wrap mb-4">
             {currentCircle?.members.slice(0, 2).map((m, i) => (
-              <div key={i} className="text-3xl">{m.photo}</div>
+              <div key={i} className="text-3xl">{m.photo && m.photo.startsWith('http') ? '👤' : m.photo || '👤'}</div>
             ))}
           </div>
         </div>
@@ -868,7 +886,7 @@ function App() {
           <div className="flex justify-center gap-4 mb-6">
             {otherMembers.map((member, i) => (
               <div key={i} className="text-center">
-                {member.photo && typeof member.photo === 'string' && member.photo.startsWith('data:') ? (
+                {member.photo && typeof member.photo === 'string' && member.photo.startsWith('http') ? (
                   <img 
                     src={member.photo} 
                     alt={member.name}
@@ -1047,7 +1065,13 @@ function App() {
             <div className="mb-8">
               {userData.photo ? (
                 <div className="text-center">
-                  <img src={userData.photo} alt="Profile" className="w-32 h-32 rounded-full object-cover mx-auto mb-4 shadow-lg border-4" style={{ borderColor: colors.primary }} />
+                  {userData.photo.startsWith('http') ? (
+                    <img src={userData.photo} alt="Profile" className="w-32 h-32 rounded-full object-cover mx-auto mb-4 shadow-lg border-4" style={{ borderColor: colors.primary }} />
+                  ) : (
+                    <div className="w-32 h-32 rounded-full flex items-center justify-center text-5xl mx-auto mb-4 shadow-lg border-4" style={{ borderColor: colors.primary, backgroundColor: colors.background }}>
+                      {userData.photo}
+                    </div>
+                  )}
                   <button onClick={() => fileInputRef.current?.click()} className="px-4 py-2 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>
                     Change Photo
                   </button>
@@ -1182,15 +1206,17 @@ function App() {
     );
   }
 
+  // 🔥 FIX: Chat Screen mit Member Liste UND fixed textbox
   if (screen === 'chat') return (
-    <div className="h-screen flex flex-col pb-20" style={{ backgroundColor: colors.background }}>
+    <div className="h-screen flex flex-col" style={{ backgroundColor: colors.background }}>
       <div className="px-6 py-4 shadow-sm" style={{ backgroundColor: colors.white }}>
         <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
         <p className="text-sm text-gray-600">{currentCircle?.members.length || 0} members</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        {/* 🔥 MEMBERS ANGEZEIGT DIREKT IM CHAT! */}
+      {/* Scrollable content area - WICHTIG: pb-24 damit Platz für input bleibt */}
+      <div className="flex-1 overflow-y-auto px-6 py-4 pb-24">
+        {/* Members List */}
         <div className="mb-6 p-5 rounded-3xl" style={{ backgroundColor: colors.white }}>
           <h4 className="font-semibold mb-4 flex items-center gap-2" style={{ color: colors.deepBlue }}>
             <Users size={20} color={colors.primary} />
@@ -1199,9 +1225,13 @@ function App() {
           <div className="space-y-3">
             {currentCircle?.members.map((member, idx) => (
               <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl" style={{ backgroundColor: colors.background }}>
-                <div className="w-12 h-12 rounded-full flex items-center justify-center text-2xl border-2" 
+                <div className="w-12 h-12 rounded-full flex items-center justify-center border-2" 
                   style={{ borderColor: colors.primary, backgroundColor: colors.white }}>
-                  {member.photo || '👤'}
+                  {member.photo && member.photo.startsWith('http') ? (
+                    <img src={member.photo} alt={member.name} className="w-full h-full rounded-full object-cover" />
+                  ) : (
+                    <span className="text-2xl">{member.photo || '👤'}</span>
+                  )}
                 </div>
                 <div className="flex-1">
                   <p className="font-bold" style={{ color: colors.deepBlue }}>{member.name || 'Member'}</p>
@@ -1289,7 +1319,8 @@ function App() {
         )}
       </div>
 
-      <div className="p-4" style={{ backgroundColor: colors.white }}>
+      {/* 🔥 FIX: Fixed Input Box - AUSSERHALB des scroll containers */}
+      <div className="fixed bottom-16 left-0 right-0 p-4" style={{ backgroundColor: colors.white, borderTop: `1px solid ${colors.background}` }}>
         <div className="flex gap-2">
           <input 
             type="text" 
@@ -1360,7 +1391,13 @@ function App() {
 
       <div className="mb-8 text-center">
         {userData.photo && (
-          <img src={userData.photo} alt="Profile" className="w-32 h-32 rounded-full object-cover mx-auto mb-4 shadow-lg border-4" style={{ borderColor: colors.primary }} />
+          userData.photo.startsWith('http') ? (
+            <img src={userData.photo} alt="Profile" className="w-32 h-32 rounded-full object-cover mx-auto mb-4 shadow-lg border-4" style={{ borderColor: colors.primary }} />
+          ) : (
+            <div className="w-32 h-32 rounded-full flex items-center justify-center text-5xl mx-auto mb-4 shadow-lg border-4" style={{ borderColor: colors.primary, backgroundColor: colors.background }}>
+              {userData.photo}
+            </div>
+          )
         )}
         <h2 className="text-2xl font-bold" style={{ color: colors.deepBlue }}>{userData.name}</h2>
         <p className="text-gray-600">{userData.age} years • {userData.city}</p>
