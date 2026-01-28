@@ -1389,6 +1389,31 @@ function App() {
 
   // 🔥 FIX: Chat Screen mit Member Liste UND fixed textbox
   if (screen === 'chat') return (
+    !currentCircle ? (
+      <div className="min-h-screen pb-20 px-6 py-8" style={{ backgroundColor: colors.background }}>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-2xl font-bold" style={{ color: colors.deepBlue }}>Circle</h1>
+          <button onClick={() => { setBottomNav('home'); setScreen('home'); }} className="px-4 py-2 rounded-full" style={{ backgroundColor: colors.white, color: colors.primary }}>
+            Home
+          </button>
+        </div>
+        <p className="text-gray-600 mb-6">Wir laden deinen Cirqle…</p>
+
+        <div className="p-6 rounded-3xl text-center" style={{ backgroundColor: colors.white }}>
+          <div className="text-5xl mb-3">⏳</div>
+          <p className="text-gray-600 mb-4">Noch keine Circle-Daten verfügbar.</p>
+          <button
+            onClick={() => { setBottomNav('home'); setScreen('home'); }}
+            className="px-6 py-3 rounded-full"
+            style={{ backgroundColor: colors.primary, color: colors.white }}
+          >
+            Zurück
+          </button>
+        </div>
+
+        <BottomNavigation />
+      </div>
+    ) : (
     <div className="h-screen flex flex-col" style={{ backgroundColor: colors.background }}>
       <div className="px-6 py-4 shadow-sm" style={{ backgroundColor: colors.white }}>
         <h3 className="font-semibold" style={{ color: colors.deepBlue }}>Your Cirqle</h3>
@@ -1416,7 +1441,7 @@ function App() {
                 </div>
                 <div className="flex-1">
                   <p className="font-bold" style={{ color: colors.deepBlue }}>{member.name || 'Member'}</p>
-                  <p className="text-xs text-gray-600">{member.age} years • {currentCircle.city}</p>
+                  <p className="text-xs text-gray-600">{member.age} years • {currentCircle?.city || ''}</p>
                 </div>
                 {member.id === currentUser?.id && (
                   <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ backgroundColor: colors.primary, color: colors.white }}>You</span>
@@ -1544,6 +1569,7 @@ function App() {
       
       <BottomNavigation />
     </div>
+    )
   );
 
   if (screen === 'home') return (
@@ -1635,4 +1661,3 @@ function App() {
 }
 
 export default App;
-
