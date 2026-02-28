@@ -105,7 +105,6 @@ function App() {
   const [showWinnerModal, setShowWinnerModal] = useState(false);
   const [winningActivity, setWinningActivity] = useState(null);
   const [dateOptions, setDateOptions] = useState([]);
-  const [dateVotes, setDateVotes] = useState({});
   const [selectedDate, setSelectedDate] = useState(null);
   const [showDatePoll, setShowDatePoll] = useState(false);
   const [showEventConfirmation, setShowEventConfirmation] = useState(false);
@@ -117,7 +116,6 @@ function App() {
   const matchRevealTouchStart = useRef(null);
   
   const chatEndRef = useRef(null);
-  const messagesSubscription = useRef(null);
   const fileInputRef = useRef(null);
   const chatImageInputRef = useRef(null);
 
@@ -604,30 +602,17 @@ function App() {
   const finishVoting = async (finalUserVotes) => {
     try {
       console.log('🔥 Starting finishVoting...');
-      
-      setCurrentVotingIndex(votingActivities.length);
-      
-      const allVotes = {};
-      
-      votingActivities.forEach(activity => {
-        const userVote = finalUserVotes[activity.id] || 3;
-        const votes = [userVote];
-        
-        for (let i = 0; i < 3; i++) {
-          votes.push(Math.floor(Math.random() * 4) + 1);
-        }
-        
-        const average = votes.reduce((a, b) => a + b, 0) / votes.length;
-        allVotes[activity.id] = average;
-      });
 
-      let highestScore = 0;
+      setCurrentVotingIndex(votingActivities.length);
+
+      let highestScore = -1;
       let winner = null;
 
-      Object.entries(allVotes).forEach(([activityId, score]) => {
+      votingActivities.forEach(activity => {
+        const score = finalUserVotes[activity.id] ?? 0;
         if (score > highestScore) {
           highestScore = score;
-          winner = votingActivities.find(a => a.id === activityId);
+          winner = activity;
         }
       });
 
@@ -716,16 +701,7 @@ function App() {
   const voteForDate = async (dateId) => {
     try {
       console.log('🔥 Starting voteForDate...');
-      
-      const allVotes = { [dateId]: 4 };
-      dateOptions.forEach(opt => {
-        if (opt.id !== dateId) {
-          allVotes[opt.id] = Math.floor(Math.random() * 3);
-        }
-      });
-      
-      setDateVotes(allVotes);
-      
+
       const winnerDate = dateOptions.find(d => d.id === dateId);
       setSelectedDate(winnerDate);
       setShowDatePoll(false);
@@ -802,12 +778,8 @@ function App() {
       
     } catch (error) {
       console.error('❌ Photo upload error:', error);
-      alert('Error uploading photo. Using emoji instead.');
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setUserData({ ...userData, photo: '👤' });
-      };
-      reader.readAsDataURL(file);
+      alert('Error uploading photo. Using default avatar instead.');
+      setUserData({ ...userData, photo: '👤' });
     }
   };
 
